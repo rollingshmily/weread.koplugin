@@ -58,6 +58,9 @@ expect(local_stats.converted == 1 and local_stats.unresolved == 0,
 expect(transformed:find('epub:type="footnote"', 1, true)
     and transformed:find("同章脚注内容", 1, true),
     "converted same-chapter note was not embedded")
+expect(not transformed:find('id="note-1"', 1, true)
+    and not transformed:find("[1] 同章脚注内容", 1, true),
+    "original aside footnote block was not removed")
 expect(Footnotes.validate(transformed) == true,
     "valid generated footnote markup failed validation")
 

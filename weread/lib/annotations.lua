@@ -245,21 +245,23 @@ function Annotations.buildThoughtPopupItems(range_review)
 
     local items = {}
     for i, pr in ipairs(range_review.pageReviews) do
-        local review = pr.review or {}
-        local author = review.author or {}
-        local abstract = nil
-        if i == 1 then
-            abstract = review.abstract or review.contextAbstract
-            if type(abstract) ~= "string" or abstract == "" then
-                abstract = nil
+        if type(pr) == "table" then
+            local review = type(pr.review) == "table" and pr.review or {}
+            local author = type(review.author) == "table" and review.author or {}
+            local abstract = nil
+            if i == 1 then
+                abstract = review.abstract or review.contextAbstract
+                if type(abstract) ~= "string" or abstract == "" then
+                    abstract = nil
+                end
             end
+            items[#items + 1] = {
+                abstract = abstract,
+                author = tostring(author.nick or author.name or "匿名"),
+                content = tostring(review.content or ""),
+                likes_count = tonumber(pr.likesCount) or 0,
+            }
         end
-        items[#items + 1] = {
-            abstract = abstract,
-            author = tostring(author.nick or author.name or "匿名"),
-            content = tostring(review.content or ""),
-            likes_count = tonumber(pr.likesCount) or 0,
-        }
     end
     return items
 end
@@ -281,6 +283,22 @@ function Annotations.formatThoughtPopupItem(item)
     return table.concat(parts, "\n")
 end
 
+--- Remove the marker emitted by pre-1.2.7 EPUB generation.
+-- Only the plugin-owned wr-star span is removed; ordinary literal asterisks in
+-- book text are preserved.
+function Annotations.stripLegacyThoughtMarkers(html)
+    if type(html) ~= "string" or html == "" then
+        return html
+    end
+    return (html:gsub("<span([^>]*)>%s*%*%s*</span>", function(attrs)
+        local class = attrs:match("class%s*=%s*['\"]([^'\"]*)['\"]")
+        if class and class:find("wr-star", 1, true) then
+            return ""
+        end
+        return "<span" .. attrs .. ">*</span>"
+    end))
+end
+
 --- 在 HTML 中注入下划线标记。
 -- @string html  完整的原始 HTML（包含 body 标签）
 -- @table  underlines  划线列表
@@ -299,6 +317,11 @@ function Annotations.injectUnderlines(html, underlines, thought_reviews, chapter
     html = stripLeadingBOM(html)
     if html ~= original_html then
         logger.info("annotations: stripped BOM")
+    end
+    local cleaned_html = Annotations.stripLegacyThoughtMarkers(html)
+    if cleaned_html ~= html then
+        logger.info("annotations: stripped legacy thought markers")
+        html = cleaned_html
     end
 
     -- 解析所有 range

@@ -48,6 +48,11 @@ expect(thought_html:find("wr%-thought%-link") ~= nil
 expect(thought_html:find('id="wrthought%-book_2%-chapter_1%-3%-8"') ~= nil,
     "thought anchor id was not sanitized")
 
+local legacy_marker_html = Annotations.stripLegacyThoughtMarkers(
+    '<p>abc<span class="wr-star">*</span>def<span class="literal-star">*</span></p>')
+expect(legacy_marker_html == '<p>abcdef<span class="literal-star">*</span></p>',
+    "legacy thought marker was not removed without touching normal stars")
+
 local trailing_whitespace = Annotations.injectUnderlines("<p>abc</p>\n  ", {
     { range = "3-12" },
 }, { ["3-12"] = true }, "chapter/11", "book")
@@ -74,6 +79,16 @@ expect(css:find(".wr%-underline") and css:find(".wr%-thought%-link"),
     "annotation CSS did not include underline and thought styles")
 expect(css:find("wr%-star") == nil,
     "thought star CSS was removed")
+
+local malformed_page_reviews = Annotations.buildThoughtPopupItems({
+    pageReviews = {
+        function() end,
+        { review = { content = "valid thought" }, likesCount = 2 },
+    },
+})
+expect(#malformed_page_reviews == 1
+    and malformed_page_reviews[1].content == "valid thought",
+    "malformed pageReview entry must not abort thought database conversion")
 
 
 local xhtml = Content.txt_to_xhtml("first & <tag>\r\n\r\nsecond")

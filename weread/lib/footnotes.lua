@@ -216,7 +216,7 @@ local function collect_refs(html)
     return refs
 end
 
-local BLOCK_TAGS = { "aside", "li", "p", "div", "section", "blockquote", "dd", "td" }
+local BLOCK_TAGS = { "p", "li", "dd", "td", "blockquote", "section", "div", "aside" }
 
 local function remember_definition(definitions, anchor, inner)
     if not anchor or anchor == "" or definitions[anchor] then return end
@@ -446,30 +446,38 @@ end
 
 local function strip_consumed_note_blocks(html, converted_anchors)
     local removed = 0
-    html = html:gsub("<[pP]([^>]*)>(.-)</[pP]%s*>", function(attrs, inner)
-        local class = get_attr(attrs, "class") or ""
-        local lower = class:lower()
-        if not has_token(class, "note") and not lower:find("fncontent", 1, true) then
-            return "<p" .. attrs .. ">" .. inner .. "</p>"
-        end
-        local consumed = false
-        local own_anchor = get_attr(attrs, "id") or get_attr(attrs, "name")
-        if own_anchor and converted_anchors[own_anchor] then consumed = true end
-        if not consumed then
-            for raw_tag in inner:gmatch("<[%a][^>]*>") do
-                local anchor = get_attr(raw_tag, "id") or get_attr(raw_tag, "name")
-                if anchor and converted_anchors[anchor] then
+    local function strip_tag_blocks(source, tag)
+        for _i, tag_name in ipairs({ tag, tag:upper() }) do
+            source = source:gsub("<" .. tag_name .. "([^>]*)>(.-)</"
+                .. tag_name .. "%s*>", function(attrs, inner)
+                local consumed = false
+                local own_anchor = get_attr(attrs, "id") or get_attr(attrs, "name")
+                if own_anchor and converted_anchors[own_anchor] then
                     consumed = true
-                    break
                 end
-            end
+                if not consumed then
+                    for raw_tag in inner:gmatch("<[%a][^>]*>") do
+                        local anchor = get_attr(raw_tag, "id") or get_attr(raw_tag, "name")
+                        if anchor and converted_anchors[anchor] then
+                            consumed = true
+                            break
+                        end
+                    end
+                end
+                if consumed then
+                    removed = removed + 1
+                    return ""
+                end
+                return "<" .. tag_name .. attrs .. ">" .. inner
+                    .. "</" .. tag_name .. ">"
+            end)
         end
-        if consumed then
-            removed = removed + 1
-            return ""
-        end
-        return "<p" .. attrs .. ">" .. inner .. "</p>"
-    end)
+        return source
+    end
+
+    for _i, tag in ipairs(BLOCK_TAGS) do
+        html = strip_tag_blocks(html, tag)
+    end
     return html, removed
 end
 
