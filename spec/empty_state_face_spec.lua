@@ -179,6 +179,9 @@ expect(cover_view._item_rows[1].height == cover_view.cover_cell_height
         and cover_view._item_rows[4].height
             == cover_view.cover_content_height - cover_view.cover_cell_height,
     "cover bookshelf rows did not fill the available content height")
+local cover_image_frame = cover_view._item_rows[1].frame[1][1][1][1][1]
+expect(cover_image_frame.bordersize == 0,
+    "cover image retained the outer black border")
 expect(#shown == 3, "empty-state and cover bookshelf views should be shown")
 
 print(("empty_state_face_spec: %d checks"):format(checks))

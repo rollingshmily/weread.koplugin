@@ -178,7 +178,7 @@ function CoverCell:init()
             height = cover_height,
             margin = 0,
             padding = padding,
-            bordersize = border,
+            bordersize = 0,
             background = Blitbuffer.COLOR_WHITE,
             CenterContainer:new{
                 dimen = Geom:new{ w = image_width, h = image_height },
