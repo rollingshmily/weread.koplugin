@@ -118,9 +118,11 @@ for _, name in ipairs({
     "ui/widget/horizontalgroup",
     "ui/widget/horizontalspan",
     "ui/widget/linewidget",
+    "ui/widget/overlapgroup",
     "ui/widget/titlebar",
     "ui/widget/verticalgroup",
     "ui/widget/verticalspan",
+    "ui/widget/widget",
 }) do
     package.preload[name] = widget_module
 end
@@ -151,6 +153,32 @@ ok, error_message = pcall(function()
     }, {})
 end)
 expect(ok, "empty review list failed to build: " .. tostring(error_message))
-expect(#shown == 2, "both empty-state views should be shown")
+
+local books = {
+    { title = "One", _cached = true },
+    { title = "Two" },
+    { title = "Three" },
+    { title = "Four" },
+}
+local cover_view = LibraryView.show({
+    mode = "books", books = books, accounts = {},
+    paged = true, page = 1, page_size = 10,
+    cover_mode = true, cover_columns = 3, cover_rows = 2,
+    cover_paths = { [books[1]] = "/covers/one.jpg" },
+}, {})
+expect(cover_view._item_rows[1].status == nil,
+    "cover bookshelf retained date or cache status metadata")
+expect(cover_view._item_rows[1]._has_cached_corner == true
+        and cover_view._item_rows[1]._cached_corner_size == 16
+        and cover_view._item_rows[2]._has_cached_corner == false,
+    "cover bookshelf cached corner did not follow download state")
+expect(cover_view._item_rows[1].width == 200
+        and cover_view._item_rows[3].width == 200,
+    "cover bookshelf columns did not fill the complete screen width")
+expect(cover_view._item_rows[1].height == cover_view.cover_cell_height
+        and cover_view._item_rows[4].height
+            == cover_view.cover_content_height - cover_view.cover_cell_height,
+    "cover bookshelf rows did not fill the available content height")
+expect(#shown == 3, "empty-state and cover bookshelf views should be shown")
 
 print(("empty_state_face_spec: %d checks"):format(checks))
