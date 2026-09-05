@@ -105,5 +105,40 @@ assert(finish(prefetch))
 count = #calls
 assert(finish(new("chapter3", { { chapterUid = "3" } }, { offline = true })))
 assert(#calls == count)
+-- Cancellation can arrive while a network request is in flight. The response
+-- must not be committed after the caller has cleared the annotation database.
+local race_cancelled = false
+local race_store = helper.new()
+local race_client = {
+    get_chapter_underlines = function()
+        return true, { underlines = { { range = "1-2", markText = "alpha" } } }
+    end,
+    build_chapter_review_batches = function()
+        return { { "1-2" } }
+    end,
+    get_chapter_reviews_batch = function()
+        race_cancelled = true
+        return true, { reviews = {} }
+    end,
+}
+local race_job = Sync:new {
+    store = race_store,
+    client = race_client,
+    book_id = "race",
+    chapters = { { chapterUid = "1" } },
+    document = nil,
+    is_cancelled = function() return race_cancelled end,
+}
+local race_error
+for _ = 1, 50 do
+    local done, state = race_job:step()
+    if done == nil then race_error = state; break end
+    if done then break end
+end
+assert(type(race_error) == "string"
+    and race_error:find("__weread_annotation_cancelled__", 1, true),
+    "cancelled annotation response must abort before persistence")
+assert(not race_store:get("race", "batch", "1:1"),
+    "cancelled annotation response wrote a stale batch")
 helper.cleanup()
 print("external_annotations_sync_spec: resume, cross-file reuse, empty updates and offline prefetch passed")

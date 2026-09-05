@@ -718,6 +718,35 @@ test("offline manual catalog refresh reports offline instead of raw reason", fun
     eq(f.notifications[1].code, "offline", "offline message is explicit")
 end)
 
+test("account changes terminate and invalidate an in-flight progress job", function()
+    local terminated = 0
+    local subprocess = {
+        run = function() return 321, 654 end,
+        write_all = function() end,
+        is_done = function() return false end,
+        terminate = function() terminated = terminated + 1 end,
+        read_size = function() return 0 end,
+        read_all = function() return nil end,
+    }
+    local f = fixture({
+        bookId = "book",
+        progress = 25,
+        chapterUid = 22,
+        chapterIdx = 2,
+        chapterOffset = 150,
+        updateTime = 10,
+    }, { subprocess = subprocess })
+    f.sync:on_reader_ready()
+    f.step()
+    eq(f.sync.job ~= nil, true, "progress job is active before account change")
+    local generation = f.sync.generation
+    f.sync:on_account_changed()
+    eq(terminated, 1, "account change terminates the old progress process")
+    eq(f.sync.job, nil, "account change discards the old progress job")
+    eq(f.sync.generation, generation + 1, "account change invalidates callbacks")
+    eq(f.sync.current_book_id, nil, "account change clears the old book")
+end)
+
 test("progress persistence updates only the current book", function()
     local f = fixture({})
     local updates = {}

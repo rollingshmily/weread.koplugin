@@ -565,6 +565,10 @@ function ProgressSync:_upload_snapshot(position, reason, show_result, on_complet
     local attempts = 0
     local attempt
     attempt = function()
+        if upload_generation ~= self.generation then
+            self.uploading = false
+            return
+        end
         attempts = attempts + 1
         local function finish(ok, accepted, outcome)
             if ok and not accepted and type(outcome) == "table"
@@ -1000,6 +1004,28 @@ function ProgressSync:cancel_pending_jump(reason)
     self.state = "unverified"
     self:_clear_verified(tostring(reason or "pending_jump_cancelled"))
     return true
+end
+
+function ProgressSync:on_account_changed()
+    self.generation = self.generation + 1
+    self.pull_retry_token = self.pull_retry_token + 1
+    local job = self.job
+    self.job = nil
+    if job and self.subprocess
+        and type(self.subprocess.terminate) == "function" then
+        pcall(self.subprocess.terminate, job.pid)
+    end
+    self.uploading = false
+    self.pulling = false
+    self.current_book_id = nil
+    self.local_position = nil
+    self.remote_position = nil
+    self.document_context = nil
+    self.pending_jump = nil
+    self.resume_recheck_pending = false
+    self.verified = false
+    self.dirty = false
+    self.state = "account_changed"
 end
 
 function ProgressSync:on_reader_ready()

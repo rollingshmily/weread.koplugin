@@ -98,6 +98,16 @@ function WeReadPlugin:init()
     if self.downloader.recover then
         self.downloader:recover()
     end
+    if self.getUpdater then
+        local updater_ok, updater_result, updater_err = pcall(function()
+            return self:getUpdater():cleanup_backup()
+        end)
+        if not updater_ok then
+            logger.warn("updater backup recovery failed:", tostring(updater_result))
+        elseif updater_result == false then
+            logger.warn("updater backup recovery failed:", tostring(updater_err))
+        end
+    end
     self.qr_login = QRLogin:new(self, self.client, self.settings)
     self.read_report = ReadReport:new{
         settings = self.settings,

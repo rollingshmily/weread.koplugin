@@ -103,6 +103,15 @@ function M:closeWeReadUI()
 end
 
 function M:onWeReadAccountChanged()
+    if self.progress_sync and self.progress_sync.on_account_changed then
+        self.progress_sync:on_account_changed()
+    end
+    if self.downloader then
+        self.downloader:cancelPrefetch("account_changed")
+    end
+    if self._cancelUnifiedAnnotationSync then
+        self:_cancelUnifiedAnnotationSync()
+    end
     self:closeWeReadUI()
     self.shelf_regular = nil
     self.shelf_mp = nil

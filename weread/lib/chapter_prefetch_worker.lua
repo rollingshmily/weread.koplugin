@@ -71,8 +71,16 @@ function M.run(settings, client, book, chapter, context)
         context.emit { stage = "epub" }
         local path = Content.save_chapter_epub(settings, book, chapter,
             finalized, assets, state.css)
-        local descriptor = book.annotation_documents
-            and book.annotation_documents[path] or nil
+        local descriptor = {
+            clean = true,
+            chapters = { {
+                chapterUid = chapter.chapterUid,
+                chapterId = chapter.chapterId,
+                title = chapter.title,
+            } },
+        }
+        book.annotation_documents = book.annotation_documents or {}
+        book.annotation_documents[path] = descriptor
         return {
             path = path,
             chapter_uid = uid,

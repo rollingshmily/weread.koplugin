@@ -8,6 +8,7 @@ local logger = require("weread.lib.logger")
 local ltn12 = require("ltn12")
 local socketutil = require("socketutil")
 local util = require("util")
+local Crypto = require("weread.lib.crypto")
 
 local ok_archiver, Archiver = pcall(require, "ffi/archiver")
 if not ok_archiver then
@@ -22,6 +23,8 @@ Updater.DEFAULT_REPO = "weread.koplugin"
 Updater.DEFAULT_BRANCH = "main"
 Updater.PLUGIN_DIRNAME = "weread.koplugin"
 Updater.USER_AGENT = "KOReader-WeRead-Updater"
+Updater.MAX_UPDATE_BYTES = 32 * 1024 * 1024
+Updater.ALLOWED_DOWNLOAD_HOST = "github.com"
 
 -- Built-in proxies.
 -- style="prefix": proxy .. "/" .. absolute_https_url  (gh-proxy.com / ghfast.top)
@@ -91,6 +94,31 @@ end
 
 local function trim(text)
     return tostring(text or ""):match("^%s*(.-)%s*$") or ""
+end
+
+local function normalize_sha256(value)
+    local digest = trim(value):match("^sha256:([0-9a-fA-F]+)$")
+        or trim(value):match("^([0-9a-fA-F]+)$")
+    if not digest or #digest ~= 64 then return nil end
+    return digest:lower()
+end
+
+local function file_sha256(path)
+    local file, err = io.open(path, "rb")
+    if not file then return nil, err end
+    local data = file:read("*a")
+    file:close()
+    if not data then return nil, "failed to read downloaded archive" end
+    return Crypto.sha256_hex(data)
+end
+
+local function is_allowed_download_url(url, owner, repo)
+    local host, path = tostring(url or ""):match("^https://([^/]+)/(.+)$")
+    if host ~= Updater.ALLOWED_DOWNLOAD_HOST then return false end
+    local prefix = tostring(owner) .. "/" .. tostring(repo) .. "/"
+    if path:sub(1, #prefix) ~= prefix then return false end
+    return path:find("/releases/download/", 1, true) ~= nil
+        or path:find("/archive/refs/", 1, true) ~= nil
 end
 
 local function ensure_dir(path)
@@ -463,6 +491,46 @@ function Updater:get_plugin_dir()
     return data_dir .. "/plugins/" .. self.plugin_dirname
 end
 
+local function plugin_dir_looks_valid(path)
+    if lfs.attributes(path, "mode") ~= "directory" then return false end
+    for _, name in ipairs({ "_meta.lua", "main.lua" }) do
+        if lfs.attributes(path .. "/" .. name, "mode") ~= "file" then
+            return false
+        end
+    end
+    return true
+end
+
+function Updater:cleanup_backup()
+    local target_dir = self:get_plugin_dir()
+    if not target_dir then return false, "plugin directory unavailable" end
+    local backup_dir = target_dir .. ".bak"
+    local staging_dir = target_dir .. ".update-staging"
+    local target_mode = lfs.attributes(target_dir, "mode")
+    local backup_mode = lfs.attributes(backup_dir, "mode")
+    if backup_mode ~= "directory" then
+        return true
+    end
+    if target_mode == "directory" and plugin_dir_looks_valid(target_dir) then
+        remove_path(backup_dir)
+        return true, "discarded obsolete updater backup"
+    end
+    -- A power loss between moving the old plugin aside and installing the
+    -- staging tree leaves only .bak, or a partially copied target. Restore it
+    -- before PluginLoader sees us.
+    if target_mode == "directory" then
+        remove_path(target_dir)
+    end
+    if lfs.attributes(staging_dir, "mode") == "directory" then
+        remove_path(staging_dir)
+    end
+    local restored, err = os.rename(backup_dir, target_dir)
+    if not restored then
+        return false, err or "failed to restore updater backup"
+    end
+    return true, "restored updater backup"
+end
+
 function Updater:http_get(url, opts)
     opts = opts or {}
     local chunks = {}
@@ -534,6 +602,15 @@ end
 
 function Updater:download_to_file(raw_url, local_path, opts)
     opts = opts or {}
+    if not is_allowed_download_url(raw_url, self.owner, self.repo) then
+        return false, "download URL is not an allowed GitHub repository URL"
+    end
+    local expected_digest = normalize_sha256(opts.expected_sha256)
+    if opts.expected_sha256 and not expected_digest then
+        return false, "invalid expected SHA-256 digest"
+    end
+    local max_bytes = tonumber(opts.max_bytes) or Updater.MAX_UPDATE_BYTES
+    if max_bytes <= 0 then return false, "invalid update size limit" end
     local parent = local_path:match("^(.*)/")
     if parent and parent ~= "" then
         ensure_dir(parent)
@@ -580,16 +657,42 @@ function Updater:download_to_file(raw_url, local_path, opts)
             else
                 local numeric = tonumber(code)
                 local size = lfs.attributes(local_path, "size") or 0
-                if numeric == 200 and size > 64 then
-                    return true, nil, {
-                        proxy = entry.url or "",
-                        proxy_id = entry.id,
-                        style = entry.style,
-                        url = url,
-                        bytes = size,
-                    }
+                if numeric == 200 and size > 64 and size <= max_bytes then
+                    if expected_digest then
+                        local actual, hash_err = file_sha256(local_path)
+                        if not actual then
+                            os.remove(local_path)
+                            errors[#errors + 1] = string.format(
+                                "%s => hash failed: %s", label, tostring(hash_err))
+                        elseif actual ~= expected_digest then
+                            os.remove(local_path)
+                            errors[#errors + 1] = string.format(
+                                "%s => SHA-256 mismatch", label)
+                        else
+                            return true, nil, {
+                                proxy = entry.url or "",
+                                proxy_id = entry.id,
+                                style = entry.style,
+                                url = url,
+                                bytes = size,
+                                sha256 = actual,
+                            }
+                        end
+                    else
+                        return true, nil, {
+                            proxy = entry.url or "",
+                            proxy_id = entry.id,
+                            style = entry.style,
+                            url = url,
+                            bytes = size,
+                        }
+                    end
+                elseif numeric == 200 and size > max_bytes then
+                    os.remove(local_path)
+                    errors[#errors + 1] = string.format(
+                        "%s => archive exceeds %d bytes", label, max_bytes)
                 end
-                os.remove(local_path)
+                if lfs.attributes(local_path, "mode") == "file" then os.remove(local_path) end
                 errors[#errors + 1] = string.format(
                     "%s => %s",
                     label,
@@ -677,7 +780,8 @@ function Updater:pick_release_download_url(release)
             local url = asset.browser_download_url
             if type(url) == "string" and url ~= "" then
                 if name:match("%.zip$") or name:match("%.tar%.gz$") or name:match("%.tgz$") then
-                    return url, "release-asset:" .. name
+                    return url, "release-asset:" .. name,
+                        normalize_sha256(asset.digest)
                 end
             end
         end
@@ -704,6 +808,7 @@ function Updater:check_for_update()
         has_update = false,
         source = nil,
         download_url = nil,
+        expected_digest = nil,
         release = nil,
         notes = nil,
         channel = cfg.channel,
@@ -725,11 +830,12 @@ function Updater:check_for_update()
         local release, err = self:fetch_latest_release()
         if release then
             local remote_version = tostring(release.tag_name or ""):gsub("^[vV]", "")
-            local download_url, source = self:pick_release_download_url(release)
+            local download_url, source, digest = self:pick_release_download_url(release)
             result.remote_version = remote_version
             result.release = release
             result.notes = release.body
             result.download_url = download_url
+            result.expected_digest = digest
             result.source = source or ("release:" .. tostring(release.tag_name))
             result.has_update = Updater.is_newer(remote_version, local_version)
             if result.download_url then
@@ -1042,7 +1148,9 @@ function Updater:download_and_install(download_url, meta)
     ensure_dir(cache_root)
     local zip_path = string.format("%s/weread-update-%d.zip", cache_root, os.time())
 
-    local ok_dl, dl_err, dl_meta = self:download_to_file(download_url, zip_path)
+    local ok_dl, dl_err, dl_meta = self:download_to_file(download_url, zip_path, {
+        expected_sha256 = meta.expected_digest,
+    })
     if not ok_dl then
         return false, "download failed: " .. tostring(dl_err)
     end
@@ -1084,6 +1192,7 @@ function Updater:perform_update(check_result, opts)
     local ok, info = self:download_and_install(check_result.download_url, {
         remote_version = check_result.remote_version,
         source = check_result.source,
+        expected_digest = check_result.expected_digest,
     })
     return ok, info, check_result
 end

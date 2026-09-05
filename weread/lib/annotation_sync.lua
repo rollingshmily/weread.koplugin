@@ -25,6 +25,12 @@ function Sync:new(options)
     return job
 end
 
+function Sync:check_cancelled()
+    if self.cancelled or (self.is_cancelled and self.is_cancelled()) then
+        error("__weread_annotation_cancelled__", 0)
+    end
+end
+
 function Sync:yield(stage, delay, detail)
     local state = { stage = stage, delay = delay or 0.01,
         index = self.index, total = #self.chapters, completed = self.completed }
@@ -38,6 +44,7 @@ function Sync:request(fn, progress)
         self:yield(progress and progress.stage or "download",
             attempt == 1 and 0.3 or 2 ^ attempt, progress)
         local ok, data, err = fn()
+        self:check_cancelled()
         if ok and type(data) == "table" then return data end
         if attempt == 3 then error(err or "Invalid annotation response") end
     end
@@ -138,6 +145,7 @@ function Sync:run()
                 if (not original or refreshing) and self.fetch_source and not self.offline then
                     self:yield("source", 0.3)
                     local fetched = self.fetch_source(chapter)
+                    self:check_cancelled()
                     original = type(fetched) == "table" and fetched or Source.index(fetched)
                     store:put(book_id, "original", uid, original, uid)
                 end

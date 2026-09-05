@@ -204,4 +204,30 @@ assert_eq(candidates[#candidates].style, "direct", "direct last")
 fake_settings.data.update.proxy_id = "runn.i.ng"
 assert_eq(updater:get_config().proxy_id, "ghspeedup.com", "migrate runn.i.ng id")
 
+assert_eq(updater:pick_release_download_url({
+    tag_name = "v1.2.11",
+    assets = {{
+        name = "weread.koplugin-v1.2.11.zip",
+        browser_download_url = "https://github.com/rollingshmily/weread.koplugin/releases/download/v1.2.11/weread.koplugin-v1.2.11.zip",
+        digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    }},
+}),
+    "https://github.com/rollingshmily/weread.koplugin/releases/download/v1.2.11/weread.koplugin-v1.2.11.zip",
+    "release asset URL")
+local _, _, release_digest = updater:pick_release_download_url({
+    assets = {{
+        name = "update.zip",
+        browser_download_url = "https://github.com/rollingshmily/weread.koplugin/releases/download/v1/update.zip",
+        digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    }},
+})
+assert_eq(release_digest,
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "release asset digest")
+local rejected, reject_reason = updater:download_to_file(
+    "https://example.com/update.zip", "/tmp/weread-updater-rejected.zip")
+assert_eq(rejected, false, "foreign update URL rejected")
+assert(type(reject_reason) == "string" and reject_reason:find("allowed GitHub", 1, true),
+    "foreign update rejection explains source")
+
 print("updater_spec: ok")

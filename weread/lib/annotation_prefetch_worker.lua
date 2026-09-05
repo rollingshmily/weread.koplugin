@@ -23,6 +23,7 @@ function M.run(settings, client, context, chapters, worker_context)
         document_key = nil,
         refresh = false,
         offline = false,
+        is_cancelled = worker_context.cancelled,
         fetch_source = function(chapter)
             local html = Content.fetch_chapter_xhtml(client, settings,
                 source_book, chapter)
