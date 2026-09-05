@@ -109,6 +109,49 @@ local function is_trivial_note(value)
         or is_symbol_marker(text)
 end
 
+-- Decode one UTF-8 codepoint without depending on KOReader's optional utf8
+-- helpers; standalone Lua specs and the device use the same byte semantics.
+local function utf8_codepoint(text, i)
+    local b = text:byte(i)
+    if not b then return nil, 1 end
+    if b < 0x80 then return b, 1 end
+    local cp, len
+    if b >= 0xC2 and b < 0xE0 then cp, len = b - 0xC0, 2
+    elseif b >= 0xE0 and b < 0xF0 then cp, len = b - 0xE0, 3
+    elseif b >= 0xF0 and b < 0xF5 then cp, len = b - 0xF0, 4
+    else return nil, 1 end
+    for j = 1, len - 1 do
+        local cb = text:byte(i + j)
+        if not cb or cb < 0x80 or cb > 0xBF then return nil, j end
+        cp = cp * 64 + cb - 0x80
+    end
+    return cp, len
+end
+
+-- Reject only candidates made entirely of punctuation/symbols. The old ASCII
+-- word/CJK-byte heuristic dropped valid kana, Hangul, Cyrillic and astral CJK.
+local function is_symbol_only(text)
+    local i = 1
+    while i <= #text do
+        local cp, len = utf8_codepoint(text, i)
+        if not cp then
+            i = i + (len or 1)
+        elseif cp < 128 then
+            if text:sub(i, i):match("%w") then return false end
+            i = i + 1
+        elseif (cp >= 0x80 and cp <= 0xBF)
+            or (cp >= 0x2000 and cp <= 0x2FFF)
+            or (cp >= 0x3000 and cp <= 0x303F)
+            or (cp >= 0xFE00 and cp <= 0xFE0F)
+            or cp == 0xFEFF then
+            i = i + len
+        else
+            return false
+        end
+    end
+    return true
+end
+
 local function normalize_path(value)
     value = decode_entities(value):gsub("\\", "/")
     value = value:match("^%s*(.-)%s*$") or ""
@@ -219,9 +262,18 @@ end
 local BLOCK_TAGS = { "p", "li", "dd", "td", "blockquote", "section", "div", "aside" }
 
 local function remember_definition(definitions, anchor, inner)
-    if not anchor or anchor == "" or definitions[anchor] then return end
+    if not anchor or anchor == "" then return end
     local text = clean_note_text(inner)
-    if text ~= "" and not is_trivial_note(text) then
+    if text == "" or is_trivial_note(text) or is_symbol_only(text) then return end
+    -- A chapter-sized ancestor can carry the same id as the real note. Keep
+    -- bounded candidates only; direct descendants are then free to win.
+    if #text > 6000 then
+        logger.warn("dropping oversized note candidate:",
+            "anchor=", tostring(anchor), "bytes=", tostring(#text))
+        return
+    end
+    local current = definitions[anchor]
+    if not current or #text < #current.text then
         definitions[anchor] = { text = text }
     end
 end
@@ -455,7 +507,21 @@ local function strip_consumed_note_blocks(html, converted_anchors)
                 if own_anchor and converted_anchors[own_anchor] then
                     consumed = true
                 end
-                if not consumed then
+                -- Only a leaf block may be identified by a descendant anchor.
+                -- Ancestor wrappers (for example the chapter-root <div>) also
+                -- contain the anchor, but deleting them drops ordinary body
+                -- text together with the note definition. A block carrying
+                -- the converted id itself remains authoritative and may still
+                -- be removed even when it wraps a <p> or similar child.
+                local has_nested_block = inner:find("<[pP][^>]*>")
+                    or inner:find("<[lL][iI][^>]*>")
+                    or inner:find("<[dD][dD][^>]*>")
+                    or inner:find("<[tT][dD][^>]*>")
+                    or inner:find("<[bB][lL][oO][cC][kK][qQ][uU][oO][tT][eE][^>]*>")
+                    or inner:find("<[sS][eE][cC][tT][iI][oO][nN][^>]*>")
+                    or inner:find("<[dD][iI][vV][^>]*>")
+                    or inner:find("<[aA][sS][iI][dD][eE][^>]*>")
+                if not consumed and not has_nested_block then
                     for raw_tag in inner:gmatch("<[%a][^>]*>") do
                         local anchor = get_attr(raw_tag, "id") or get_attr(raw_tag, "name")
                         if anchor and converted_anchors[anchor] then
