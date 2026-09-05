@@ -26,6 +26,8 @@ local Content = require("weread.lib.content")
 local root = os.tmpname()
 os.remove(root)
 assert(os.execute("mkdir -p " .. string.format("%q", root)))
+local marker = assert(io.open(root .. "/catalog.json", "wb"))
+marker:close()
 
 local downloads = {}
 local client = {}

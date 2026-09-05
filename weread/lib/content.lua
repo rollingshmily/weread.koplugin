@@ -2183,6 +2183,98 @@ function Content.download_mp_images(client, body_html, progress, embed_base64)
     return body, assets
 end
 
+function Content.download_mp_images_to_files(
+        client, settings, book, article, body_html, progress)
+    body_html = tostring(body_html or "")
+    local html_path = Content.mp_article_path(settings, book, article)
+    local article_dir = html_path:match("^(.*)/[^/]+$")
+    if not article_dir then error("Could not resolve public-account article directory") end
+
+    local function normalize_url(src)
+        local url = tostring(src or ""):gsub("&amp;", "&")
+        if url:match("^//") then url = "https:" .. url end
+        if not url:match("^https?://mmbiz%.qpic%.cn/")
+            and not url:match("^https?://mmbiz%.qlogo%.cn/") then
+            return nil
+        end
+        return url
+    end
+
+    local asset_name = ".weread-mp-" .. basename_safe(
+        article.reviewId or article.originalId or article.bookId
+            or book.book_id or book.bookId or article.title or "article") .. "-assets"
+    local asset_dir = article_dir .. "/" .. asset_name
+    ensure_directory(asset_dir)
+
+    local unique_urls, total = {}, 0
+    body_html:gsub([=[src=(["'])([^"']-)["']]=], function(_quote, src)
+        local url = normalize_url(src)
+        if url and unique_urls[url] == nil then
+            unique_urls[url] = false
+            total = total + 1
+        end
+    end)
+
+    local resolved, index, downloaded = {}, 0, 0
+    local body = body_html:gsub([=[src=(["'])([^"']-)["']]=], function(quote, src)
+        local url = normalize_url(src)
+        if not url then return "src=" .. quote .. src .. quote end
+        if resolved[url] ~= nil then
+            local relative = resolved[url]
+            return relative and ("src=" .. quote .. relative .. quote)
+                or ("src=" .. quote .. src .. quote)
+        end
+        index = index + 1
+        if progress then progress(index, total) end
+        local stem = string.format("img-%04d", index)
+        local incoming = asset_dir .. "/" .. stem .. ".download"
+        local ok, err = pcall(function()
+            client:download_to_file(url, incoming, {
+                accept = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                referer = "https://weread.qq.com/",
+                max_bytes = 64 * 1024 * 1024,
+            })
+        end)
+        if not ok then
+            resolved[url] = false
+            logger.warn("MP image download failed:", "index=", tostring(index),
+                "error=", tostring(err))
+            pcall(os.remove, incoming)
+            collectgarbage("step", 64)
+            return "src=" .. quote .. src .. quote
+        end
+        local ext, media_type, detect_error = media_type_for_file(incoming)
+        if not ext or ext == ".bin" or not tostring(media_type):match("^image/") then
+            resolved[url] = false
+            logger.warn("MP image response is not a supported image:",
+                "index=", tostring(index), "error=", tostring(detect_error or media_type))
+            pcall(os.remove, incoming)
+            collectgarbage("step", 64)
+            return "src=" .. quote .. src .. quote
+        end
+        local filename = stem .. ext
+        local final_path = asset_dir .. "/" .. filename
+        pcall(os.remove, final_path)
+        local renamed, rename_error = os.rename(incoming, final_path)
+        if not renamed then
+            resolved[url] = false
+            logger.warn("MP image commit failed:", "index=", tostring(index),
+                "error=", tostring(rename_error))
+            pcall(os.remove, incoming)
+            collectgarbage("step", 64)
+            return "src=" .. quote .. src .. quote
+        end
+        local relative = asset_name .. "/" .. filename
+        resolved[url] = relative
+        downloaded = downloaded + 1
+        collectgarbage("step", 64)
+        return "src=" .. quote .. relative .. quote
+    end)
+    logger.info("MP images stored as local files:",
+        "downloaded=", tostring(downloaded), "total=", tostring(total))
+    return body
+end
+
 function Content.mp_article_path(settings, book, article)
     local book_id = book.book_id or book.bookId
     local dir = Content.book_resolved_dir(settings, book_id, book)
@@ -2509,7 +2601,8 @@ function Content.fetch_mp_article_html(client, settings, book, article, opts)
     end
     local cache = settings:get("cache", {})
     if cache.download_mp_images then
-        body = Content.download_mp_images(client, body, opts.progress, true)
+        body = Content.download_mp_images_to_files(
+            client, settings, book, article, body, opts.progress)
     else
         body = Content.strip_mp_images(body)
     end
