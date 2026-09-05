@@ -1515,12 +1515,76 @@ function Content.fetch_chapter_xhtml(client, settings, book, chapter)
     )
 end
 
+-- Remove hostile zero-sized root rules from server CSS. Other zero font sizes
+-- can be deliberate inline-block whitespace controls, so scope this narrowly to
+-- top-level selector lists containing only html/body.
+local function is_zero_font_size(tail)
+    local value = tostring(tail or ""):lower():match("^%s*(.-)%s*$") or ""
+    if value:sub(-10) == "!important" then
+        value = (value:match("^(.-)%s*!important$") or ""):match("^%s*(.-)%s*$")
+    end
+    return value == "" or value == "%" or value:match("^%a+$") ~= nil
+end
+
+local function is_root_selector_list(selectors)
+    local count = 0
+    for selector in tostring(selectors or ""):gmatch("[^,]+") do
+        count = count + 1
+        local name = selector:lower():gsub("^%s+", ""):gsub("%s+$", "")
+        if name ~= "html" and name ~= "body" then return false end
+    end
+    return count > 0
+end
+
+local function strip_zero_font_sizes(block)
+    local removed = 0
+    local cleaned = ("{" .. block):gsub(
+        "([^%w%-])(%s*)font%-size%s*:%s*0([^;}]*)(;?)",
+        function(boundary, leading, tail)
+            if not is_zero_font_size(tail) then return nil end
+            removed = removed + 1
+            return boundary .. leading
+        end)
+    return cleaned:sub(2), removed
+end
+
+local function sanitize_book_css_pass(css)
+    local removed = 0
+    local sanitized = tostring(css):gsub("([^{}]*)(%b{})", function(prelude, block)
+        local selectors = prelude:match("[^;]*$") or ""
+        if not is_root_selector_list(selectors) then
+            return prelude .. block
+        end
+        local cleaned, dropped = strip_zero_font_sizes(block:sub(2, -2))
+        removed = removed + dropped
+        return prelude .. "{" .. cleaned .. "}"
+    end)
+    return sanitized, removed
+end
+
+function Content.sanitize_book_css(css)
+    if type(css) ~= "string" or css == "" then return css, 0 end
+    local sanitized, removed_total = css, 0
+    for _i = 1, 16 do
+        local next_css, removed = sanitize_book_css_pass(sanitized)
+        sanitized = next_css
+        removed_total = removed_total + removed
+        if removed == 0 then break end
+    end
+    return sanitized, removed_total
+end
+
 function Content.fetch_chapter_css(client, settings, book, chapter)
     local ok, css = pcall(function()
         return Content.decode_content_shard(Content.fetch_chapter_shard(client, settings, book, chapter, "/web/book/chapter/e_2"))
     end)
     if ok then
-        return css
+        local sanitized, removed = Content.sanitize_book_css(css)
+        if removed > 0 then
+            logger.warn("removed ", removed,
+                " hostile font-size:0 declarations from book css")
+        end
+        return sanitized
     end
     return nil
 end
