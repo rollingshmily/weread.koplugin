@@ -6,6 +6,7 @@ local logger = require("weread.lib.logger")
 local ExternalAnnotations = {}
 ExternalAnnotations.SCHEMA_VERSION = 2
 ExternalAnnotations.MATCHER_VERSION = 2
+ExternalAnnotations.PERFORMANCE_LOGGING = false
 ExternalAnnotations.MAX_SEARCH_HITS = 16
 ExternalAnnotations.CHAPTER_SEARCH_HITS = 1
 ExternalAnnotations.FALLBACK_QUOTE_BYTES = 90
@@ -89,6 +90,7 @@ local function elapsed_ms(started)
 end
 
 local function perf(...)
+    if not ExternalAnnotations.PERFORMANCE_LOGGING then return end
     local parts = {}
     for i = 1, select("#", ...) do
         parts[i] = tostring(select(i, ...))

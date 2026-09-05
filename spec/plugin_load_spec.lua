@@ -57,6 +57,7 @@ local settings_values = {
     },
 }
 local fake_settings = {
+    data_dir = "/tmp/weread-plugin-load",
     get = function(_self, key, default)
         local value = settings_values[key]
         if value == nil then return default end
@@ -71,6 +72,9 @@ local bookshelf_opened = false
 
 package.preload["weread.lib.client"] = function()
     return { new = function(_self, settings) return { settings = settings } end }
+end
+package.preload["weread.lib.background_worker"] = function()
+    return { new = function(_self, options) return { options = options } end }
 end
 package.preload["weread.lib.downloader"] = function()
     return { new = function(_self, options) return options end }

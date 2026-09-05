@@ -60,10 +60,13 @@ local cache = {
     auto_prefetch_next_chapter = false,
     book_footnotes_in_popup = false,
     download_underlines_and_thoughts = false,
+    prefetch_annotations = false,
     show_prefetch_notifications = true,
 }
 local host = {
     ui = {},
+    _xpointerOverlayPrototypeAvailable = function() return true end,
+    _annotationsVisibleForCurrentDocument = function() return false end,
     version = "test",
     settings = {
         get = function(_self, key, default)
@@ -74,6 +77,13 @@ local host = {
         flush = function() end,
     },
     downloader = { cancelPrefetch = function() end },
+    isAnnotationPrefetchEnabled = function()
+        return cache.prefetch_annotations == true
+    end,
+    setAnnotationPrefetchEnabled = function(_self, enabled)
+        cache.prefetch_annotations = enabled == true
+        return true
+    end,
     safeCallback = function(_self, _label, callback) return callback end,
 }
 for key, value in pairs(Menu) do host[key] = value end
@@ -153,21 +163,21 @@ host.detectWeReadBook = function() return nil end
 local local_reader_items = host:getMainMenuItems()
 expect(not menu_has(local_reader_items, "Sync progress now")
         and not menu_has(local_reader_items, "Book details")
-        and menu_has(local_reader_items, "Local-book underlines and thoughts"),
+        and menu_has(local_reader_items, "Underlines and thoughts management"),
     "local document menu retained WeRead-only book actions")
 
 host.detectWeReadBook = function() return "book-1" end
 local weread_reader_items = host:getMainMenuItems()
 expect(menu_has(weread_reader_items, "Sync progress now")
         and menu_has(weread_reader_items, "Book details")
-        and not menu_has(weread_reader_items, "Local-book underlines and thoughts"),
+        and menu_has(weread_reader_items, "Underlines and thoughts management"),
     "WeRead book menu retained the local-book annotation submenu")
 
 host.detectWeReadBook = function() return "mp-book" end
 local mp_reader_items = host:getMainMenuItems()
 expect(not menu_has(mp_reader_items, "Sync progress now")
         and menu_has(mp_reader_items, "Book details")
-        and not menu_has(mp_reader_items, "Local-book underlines and thoughts"),
+        and menu_has(mp_reader_items, "Underlines and thoughts management"),
     "public-account menu exposed unsupported progress or local-book actions")
 
 host.ui.document = nil
@@ -227,8 +237,8 @@ prefetch_items[1].callback({
 })
 expect(cache.auto_prefetch_next_chapter == false and shown_widget ~= nil,
     "enabling automatic prefetch first shows a confirmation")
-expect(shown_widget.text:find("few seconds of delay", 1, true) ~= nil,
-    "confirmation warns about possible chapter-opening delay")
+expect(shown_widget.text:find("background process", 1, true) ~= nil,
+    "confirmation explains background resource use")
 shown_widget.ok_callback()
 expect(cache.auto_prefetch_next_chapter == true and menu_updates == 1,
     "automatic prefetch is enabled only after confirmation")

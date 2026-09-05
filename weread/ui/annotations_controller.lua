@@ -40,7 +40,8 @@ function M:onReadSettings()
     if not self.ui or not self.ui.document or not self:detectWeReadBook() then
         return
     end
-    if self.settings:get("cache").show_annotations ~= false then
+    if self.settings:get("cache").show_annotations ~= false
+        and not (self._usesUnifiedAnnotations and self:_usesUnifiedAnnotations()) then
         return
     end
     local typeset = self.ui.typeset
@@ -86,7 +87,7 @@ function M:applyAnnotationVisibility()
     if styletweak and type(styletweak.getCssText) == "function" then
         tweaks = styletweak:getCssText() or ""
     end
-    if not show then
+    if not show or (self._usesUnifiedAnnotations and self:_usesUnifiedAnnotations()) then
         tweaks = tweaks .. "\n" .. ANNOTATION_HIDE_CSS
     end
     local ok, err = pcall(function()
@@ -99,6 +100,11 @@ function M:applyAnnotationVisibility()
 end
 
 function M:toggleAnnotationVisibility()
+    local context = self._annotation_context
+    local summary = context and self:_annotationSummary(context)
+    if self.ensureAnnotationDisplay and (not summary or summary.chapters == 0) then
+        if self:ensureAnnotationDisplay() then return true end
+    end
     local cache = self.settings:get("cache")
     cache.show_annotations = not (cache.show_annotations ~= false)
     self.settings:set("cache", cache)
@@ -179,7 +185,8 @@ function M:_installLinkFilter()
         if not isThoughtHref(href) then
             return link
         end
-        if plugin.settings:get("cache").show_annotations == false
+        if (plugin._usesUnifiedAnnotations and plugin:_usesUnifiedAnnotations())
+            or plugin.settings:get("cache").show_annotations == false
             or isPageTurnEdgeTap(plugin, ges) then
             return nil
         end
@@ -193,7 +200,8 @@ function M:_installLinkFilter()
             -- When we want to ignore thoughts (edge zone or annotations hidden),
             -- detect the link with the *original* getter and suppress only our
             -- current or legacy thought anchors.
-            if plugin.settings:get("cache").show_annotations == false
+            if (plugin._usesUnifiedAnnotations and plugin:_usesUnifiedAnnotations())
+                or plugin.settings:get("cache").show_annotations == false
                 or isPageTurnEdgeTap(plugin, ges) then
                 local link = plugin._orig_getLinkFromGes(link_self, ges)
                 if link then
@@ -864,7 +872,8 @@ function M:_onThoughtTap(ges)
     -- Annotations hidden: _installLinkFilter already made getLinkFromGes return nil
     -- for our anchors, so we normally return above before reaching here. Kept as a
     -- defensive fall-through in case the filter is not active.
-    if self.settings:get("cache").show_annotations == false then
+    if (self._usesUnifiedAnnotations and self:_usesUnifiedAnnotations())
+        or self.settings:get("cache").show_annotations == false then
         return false
     end
 

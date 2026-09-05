@@ -150,6 +150,7 @@ function M:onReaderReady()
     -- range, so unsupported/non-participating books pay only an empty module
     -- function call during paint.
     self:_setupXPointerOverlayPrototype()
+    if self.onUnifiedAnnotationsReady then self:onUnifiedAnnotationsReady() end
 
     local sync_started = time.now()
     self.progress_sync:on_reader_ready()
@@ -180,6 +181,9 @@ function M:onCloseDocument()
     perf("close.progress_sync", sync_started)
     self._reader_session_gen = (self._reader_session_gen or 0) + 1
     self.downloader:cancelPrefetch("document_closed")
+    if self._cancelUnifiedAnnotationSync then self:_cancelUnifiedAnnotationSync() end
+    self._annotation_pending_prefetch = nil
+    self._annotation_context = nil
     self._current_weread_file = nil
     self._current_weread_book_id = nil
     self:_teardownThoughtInterception()
@@ -232,6 +236,9 @@ function M:maybePrefetchNextChapter(book_id)
     local next_uid = tostring(next_chapter.chapterUid or next_chapter.chapterId or "")
     local cached = book.cached_chapters and book.cached_chapters[next_uid]
     if file_exists(cached) then
+        if self.prefetchChapterAnnotations then
+            self:prefetchChapterAnnotations(book, next_chapter)
+        end
         if not self.downloader:isPrefetching(book, next_chapter) then
             self.downloader:cancelPrefetch("next_chapter_cached")
         end
@@ -244,7 +251,7 @@ function M:maybePrefetchNextChapter(book_id)
     local title = next_chapter.title or T(_("Chapter %1"), next_uid)
     return self.downloader:start(book, { next_chapter }, "chapter", {
         single_chapter = true,
-        include_annotations = cache.download_underlines_and_thoughts == true,
+        include_annotations = false,
         prefetch = true,
         start_delay = cache.show_prefetch_notifications == false and 0.1 or 0.7,
         silent_completion = true,
@@ -259,6 +266,10 @@ function M:maybePrefetchNextChapter(book_id)
         end,
         on_complete = function(ok, value)
             if ok then
+                if self.prefetchChapterAnnotations
+                    and not self.downloader:isPromotedPrefetch(book, next_chapter) then
+                    self:prefetchChapterAnnotations(book, next_chapter)
+                end
                 logger.info("succeeded:",
                     "book_id=", tostring(book_id),
                     "chapter_uid=", next_uid,
@@ -281,6 +292,9 @@ function M:maybePrefetchNextChapter(book_id)
                 return
             end
             local reason = value == "offline" and _("Network is not connected")
+                or value == "low_memory" and _("Not enough free memory; prefetch skipped")
+                or value == "worker_unavailable" and _("Background prefetch is unavailable")
+                or value == "worker_timeout" and _("Background prefetch timed out")
                 or display_error(value)
             logger.warn("failed:",
                 "book_id=", tostring(book_id),
@@ -312,6 +326,8 @@ function M:stopReadReport(reason)
 end
 
 function M:onSuspend()
+    if self._cancelUnifiedAnnotationSync then self:_cancelUnifiedAnnotationSync() end
+    self._annotation_pending_prefetch = nil
     self.progress_sync:on_suspend()
     self.read_report:on_suspend()
 end

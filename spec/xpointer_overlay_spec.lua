@@ -165,6 +165,24 @@ local bind_host = {
     showList = function(_self, _title, items) listed_items = items end,
     showTransientInfo = function() end,
 }
+bind_host.getUnifiedAnnotationMenuItems = function(_self)
+    return {
+        { text_func = function()
+            return saved_document and saved_document.binding
+                and "Matched book: " .. saved_document.binding.title
+                or "Match with WeRead book"
+        end },
+        { text_func = function()
+            local stats = saved_document and saved_document.stats
+            return stats and "Sync underlines and thoughts · " .. tostring(stats.located)
+                .. " matched" or "Sync underlines and thoughts"
+        end },
+        { text = "Clear data", callback = function(menu)
+            saved_document = nil
+            if menu and menu.updateItems then menu:updateItems() end
+        end },
+    }
+end
 for name, method in pairs(Controller) do bind_host[name] = method end
 local sync_calls = 0
 bind_host.syncExternalAnnotations = function() sync_calls = sync_calls + 1 end
