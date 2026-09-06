@@ -1,6 +1,20 @@
 package.path = "./?.lua;" .. package.path
 local helper = require("spec.helpers.annotation_test_store")
+local attrs = { size = 1234, modification = 5678, change = 100 }
+package.preload["libs/libkoreader-lfs"] = function()
+    return { attributes = function() return attrs end }
+end
+package.preload["version"] = function()
+    return { getCurrentRevision = function() return "test-revision" end }
+end
 local store = helper.new()
+local stable_key = store.documentKey("/books/test.epub")
+attrs.change = 200
+assert(store.documentKey("/books/test.epub") == stable_key,
+    "document key changed when only ctime changed")
+attrs.modification = 5679
+assert(store.documentKey("/books/test.epub") ~= stable_key,
+    "document key did not change when the EPUB mtime changed")
 store:put("book", "source", "1", { revision = "a", underlines = {} }, "1")
 assert(helper.new():get("book", "source", "1").revision == "a", "shared data must survive reopening")
 assert(not store:get("other", "source", "1"), "books must not share annotation data")
@@ -34,5 +48,12 @@ store:put("book", "projection", "full:deleted", { records = {} }, "deleted")
 store:pruneCatalog("book", { { chapterUid = "1" }, { chapterUid = "2" } })
 assert(not store:get("book", "source", "deleted") and not store:get("book", "projection", "full:deleted"))
 assert(store:get("book", "source", "1"), "catalog cleanup removed a live chapter")
+store:put("book", "source", "stale", { revision = "stale" }, "stale")
+store:put("book", "projection", "old-file:stale", { records = {} }, "stale")
+assert(store:clearKinds("book", { "source", "projection" }))
+assert(not store:get("book", "source", "1")
+    and not store:get("book", "source", "stale")
+    and not store:get("book", "projection", "old-file:stale"),
+    "book-wide derived data was not cleared")
 helper.cleanup()
 print("annotation_store_spec: real SQLite persistence, isolation, rollback and migration passed")

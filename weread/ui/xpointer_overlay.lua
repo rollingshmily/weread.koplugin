@@ -25,6 +25,7 @@ function Overlay:new(opts)
     opts = opts or {}
     return setmetatable({
         records = opts.records or {},
+        records_ordered = opts.records_ordered == true,
         enabled = opts.enabled ~= false,
         cache = {},
         visible = {},
@@ -40,8 +41,10 @@ function Overlay:new(opts)
     }, self)
 end
 
-function Overlay:setRecords(records)
+function Overlay:setRecords(records, ordered)
     self.records = type(records) == "table" and records or {}
+    self.records_ordered = ordered == true
+    self._ordered_prefix_ends = nil
     self:invalidate()
 end
 
@@ -57,7 +60,46 @@ function Overlay:invalidate()
 end
 
 function Overlay:resetLayout()
+    self._ordered_prefix_ends = nil
     self:invalidate()
+end
+
+function Overlay:_orderedStart(document, page_start)
+    if not self.records_ordered or not page_start
+        or type(document.compareXPointers) ~= "function" then return 1 end
+    local prefix = self._ordered_prefix_ends
+    if not prefix then
+        prefix = {}
+        local latest
+        for index, record in ipairs(self.records) do
+            if type(record) ~= "table" or not record.pos0 or not record.pos1 then
+                return 1
+            end
+            if not latest then
+                latest = record.pos1
+            else
+                local ok, before = pcall(document.compareXPointers,
+                    document, latest, record.pos1)
+                if not ok then return 1 end
+                if before == 1 then latest = record.pos1 end
+            end
+            prefix[index] = latest
+        end
+        self._ordered_prefix_ends = prefix
+    end
+    local low, high = 1, #prefix + 1
+    while low < high do
+        local middle = math.floor((low + high) / 2)
+        if middle > #prefix then
+            high = middle
+        else
+            local ok, before = pcall(document.compareXPointers,
+                document, prefix[middle], page_start)
+            if not ok then return 1 end
+            if before == 1 then low = middle + 1 else high = middle end
+        end
+    end
+    return low
 end
 
 local function draw_boxes(overlay, bb, x, y, boxes)
@@ -87,12 +129,22 @@ function Overlay:_computeVisible()
     local top = tonumber(document:getCurrentPos()) or 0
     local height = self.ui.dimen and tonumber(self.ui.dimen.h) or 0
     local visible_pages = type(document.getVisiblePageCount) == "function"
-        and tonumber(document:getVisiblePageCount()) or 1
+        and tonumber(document.getVisiblePageCount()) or 1
     local bottom = top + height * math.max(1, visible_pages or 1)
     local visible = {}
     local candidates = 0
 
-    for _, record in ipairs(self.records) do
+    local page_start
+    if document.getCurrentPage and document.getPageXPointer then
+        local ok_page, current_page = pcall(document.getCurrentPage, document)
+        if ok_page then
+            local ok_xp, value = pcall(document.getPageXPointer, document, current_page)
+            if ok_xp then page_start = value end
+        end
+    end
+    local first = self:_orderedStart(document, page_start)
+    for index = first, #self.records do
+        local record = self.records[index]
         if type(record) == "table" and record.pos0 and record.pos1 then
             local ok_start, start_pos = pcall(
                 document.getPosFromXPointer, document, record.pos0
@@ -117,6 +169,9 @@ function Overlay:_computeVisible()
                         end
                     end
                 end
+            elseif self.records_ordered and tonumber(start_pos)
+                and start_pos > bottom then
+                break
             end
         end
     end

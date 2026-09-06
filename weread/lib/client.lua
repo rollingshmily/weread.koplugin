@@ -760,7 +760,7 @@ function Client:get_chapter_underlines(book_id, chapter_uid)
 end
 
 function Client:build_chapter_review_batches(ranges)
-    local BATCH_SIZE = 5
+    local BATCH_SIZE = 30
     local batches = {}
     for batch_start = 1, #(ranges or {}), BATCH_SIZE do
         local batch = {}

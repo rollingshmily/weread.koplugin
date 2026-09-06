@@ -12,6 +12,21 @@ local function file(plugin)
     return plugin.ui and plugin.ui.document and plugin.ui.document.file
 end
 
+local function annotation_progress(state)
+    local completed = tonumber(state.completed) or 0
+    local current = tonumber(state.current) or 0
+    local count = tonumber(state.count) or 0
+    local fraction = count > 0 and math.max(0, math.min(1, current / count)) or 0
+    if state.stage == "thoughts" then
+        return completed + fraction * 0.5
+    elseif state.stage == "source" then
+        return completed + 0.5
+    elseif state.stage == "match" then
+        return completed + 0.5 + fraction * 0.5
+    end
+    return completed
+end
+
 function M:_annotationStore()
     if not self.annotation_store then
         self.annotation_store = require("weread.lib.annotation_store"):new(self.settings)
@@ -179,7 +194,7 @@ function M:_refreshAnnotationOverlay()
             records[#records + 1] = record
         end
     end
-    overlay:setRecords(records)
+    overlay:setRecords(records, true)
     overlay._annotation_window = window
 end
 
@@ -288,11 +303,12 @@ function M:_runAnnotationJob(context, options)
     if options.prefetch then
         return self:_runAnnotationPrefetchWorker(request, context, options)
     end
-    if not options.background then
+    if not options.prefetch and not options.background then
+        local job_chapters = options.chapters or context.chapters
         request.progress = require("weread.ui.download_dialog"):new{
             title = _("Sync underlines and thoughts"),
             description = _("Pause at any time. Saved chapters and batches will be reused."),
-            progress_max = #context.chapters,
+            progress_max = #job_chapters,
             buttons = { { { text = _("Pause"), callback = function()
                 self:_cancelUnifiedAnnotationSync()
                 self:showTransientInfo(_("Annotation progress saved."), 2)
@@ -388,8 +404,10 @@ function M:_runAnnotationJob(context, options)
                 title = T(_("%1 · chapter %2/%3"), _("Downloading"),
                     tostring(state.index), tostring(state.total))
             end
+            -- Update the bar before setTitle repaints the dialog, so the text
+            -- and bar always describe the same point in the current chapter.
+            request.progress:reportProgress(annotation_progress(state))
             request.progress:setTitle(title)
-            request.progress:reportProgress(state.completed)
         end
         UIManager:scheduleIn(state.delay or 0.01, safe_step)
     end
@@ -598,27 +616,51 @@ end
 
 function M:clearUnifiedAnnotationProjections()
     local context = self:_prepareAnnotationContext(false)
-    if not context then return end
+    if not context then return false end
     self:_cancelUnifiedAnnotationSync()
-    local changes = {
-        { kind = "manual_only", key = context.document_key, value = true },
-        { kind = "display", key = context.document_key },
-    }
-    for _, chapter in ipairs(context.chapters) do
-        local uid = Chapters.uid(chapter)
-        -- Clearing is the explicit path for fetching fresh remote data. Remove
-        -- this chapter's shared annotations and every document projection, but
-        -- retain the original chapter text so quote recovery stays cheap.
-        for _, kind in ipairs({ "source", "source_status", "download", "batch",
-            "thought", "refresh", "projection", "matching", "status" }) do
-            changes[#changes + 1] = { kind = kind, uid = uid }
+    local ok, clear_err = pcall(function()
+        -- The mapped chapter list may cover only the current local edition.
+        -- Clear derived rows book-wide so unmapped/stale chapters and old
+        -- document keys cannot reappear after reopening the book.
+        context.store:clearKinds(context.book_id, {
+            "source", "source_status", "download", "batch", "thought",
+            "refresh", "projection", "matching", "status", "generation",
+            "display", "manual_only",
+        })
+        context.store:write(context.book_id, {
+            { kind = "manual_only", key = context.document_key, value = true },
+        })
+
+        -- A migrated local-book database can otherwise seed the unified store
+        -- again. Preserve only its binding and discard records/checkpoints.
+        local legacy = self.external_annotations_db
+        if legacy and context.path then
+            local entry = legacy:getDocument(context.path)
+            local cleared, legacy_err = legacy:clearDocument(context.path)
+            if not cleared then error(legacy_err or "legacy annotation cleanup failed") end
+            if entry and entry.binding then
+                local saved, save_err = legacy:saveDocument(context.path, {
+                    binding = entry.binding,
+                })
+                if not saved then error(save_err or "annotation binding restore failed") end
+            end
         end
+    end)
+    if not ok then
+        logger.warn("annotation cleanup failed:", tostring(clear_err))
+        self:showInfo(T(_("Failed to clear underlines and thoughts: %1"), tostring(clear_err)))
+        return false
     end
-    context.store:write(context.book_id, changes)
     context.statuses = {}
     context.generation = (context.generation or 0) + 1
-    self:_refreshAnnotationOverlay()
+    self._unified_annotations_active = true
+    if self._xpointer_overlay then
+        self._xpointer_overlay._annotation_window = nil
+        self._xpointer_overlay:setRecords({}, true)
+    end
+    self:applyAnnotationVisibility()
     self:showTransientInfo(_("Underlines and thoughts cleared. Match again to download fresh data."), 3)
+    return true
 end
 
 return M

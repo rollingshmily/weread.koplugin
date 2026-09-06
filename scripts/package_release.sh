@@ -28,7 +28,8 @@ trap cleanup EXIT
 plugin_dir="$stage_dir/weread.koplugin"
 mkdir -p "$plugin_dir"
 cp _meta.lua main.lua LICENSE NOTICE README.md "$plugin_dir/"
-cp -R fonts icons integrations weread "$plugin_dir/"
+cp -R fonts icons integrations weread "$plugin_dir"
+find "$plugin_dir" -name '.DS_Store' -delete
 
 rm -f "$archive_path"
 (

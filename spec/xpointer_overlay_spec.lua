@@ -61,6 +61,43 @@ overlay:paintTo({}, 0, 0)
 expect(box_calls == 1, "page cache did not avoid repeated XPointer projection")
 expect(overlay.last_metrics.cache_hit == true, "second paint did not report cache hit")
 
+-- Ordered projections should avoid projecting every record on each page turn.
+local comparisons, position_calls = 0, 0
+local ordered_document = {
+    getCurrentPos = function() return 50 end,
+    getCurrentPage = function() return 50 end,
+    getVisiblePageCount = function() return 1 end,
+    getPageXPointer = function(_self, page) return page end,
+    compareXPointers = function(_self, a, b)
+        comparisons = comparisons + 1
+        return a == b and 0 or a < b and 1 or -1
+    end,
+    getPosFromXPointer = function(_self, value)
+        position_calls = position_calls + 1
+        return value
+    end,
+    getScreenBoxesFromPositions = function(_self, start)
+        return { { x = start, y = 1, w = 1, h = 1 } }
+    end,
+}
+local ordered_records = {}
+for index = 1, 100 do
+    ordered_records[index] = { id = tostring(index), pos0 = index,
+        pos1 = index == 49 and 52 or index + 0.2 }
+end
+local ordered = Overlay:new{ records = ordered_records, records_ordered = true }
+ordered.ui = { document = ordered_document, dimen = { h = 1 } }
+ordered.view = { view_mode = "page", drawHighlightRect = function() end }
+local first_visible = ordered:_computeVisible()
+expect(#first_visible >= 2 and first_visible[1].record.id == "49",
+    "ordered lookup skipped an underline overlapping from an earlier page")
+position_calls, comparisons = 0, 0
+ordered:_computeVisible()
+expect(position_calls < 50,
+    "ordered page lookup still projected the full annotation window")
+expect(comparisons < 25,
+    "ordered page lookup used too many interval comparisons")
+
 overlay:resetLayout()
 overlay:paintTo({}, 0, 0)
 expect(box_calls == 2, "layout reset did not invalidate screen box cache")

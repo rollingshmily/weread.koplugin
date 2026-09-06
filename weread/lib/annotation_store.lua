@@ -86,6 +86,29 @@ function Store:write(book_id, changes)
     if not ok then error(err) end
 end
 
+function Store:clearKinds(book_id, kinds)
+    local db, open_err = self:open(book_id, false)
+    if not db then
+        if open_err then error(open_err) end
+        return true
+    end
+    local stmt
+    local ok, err = pcall(function()
+        db:exec("BEGIN IMMEDIATE")
+        stmt = db:prepare("DELETE FROM annotation_data WHERE kind=?")
+        for _, kind in ipairs(kinds or {}) do
+            stmt:reset():bind(tostring(kind)):step()
+        end
+        stmt:close(); stmt = nil
+        db:exec("COMMIT")
+    end)
+    if stmt then pcall(function() stmt:close() end) end
+    if not ok then pcall(function() db:exec("ROLLBACK") end) end
+    db:close()
+    if not ok then error(err) end
+    return true
+end
+
 function Store:put(book_id, kind, key, value, uid)
     self:write(book_id, { { kind = kind, key = key, value = value, uid = uid } })
 end
@@ -151,8 +174,8 @@ function Store.documentKey(path)
     local ok, version = pcall(require, "version")
     local engine = ok and type(version) == "table" and version.getCurrentRevision
         and version:getCurrentRevision() or "unknown"
-    return Crypto.sha256_hex(table.concat({ path, tostring(attr.size),
-        tostring(attr.modification), tostring(attr.change), tostring(engine) }, "\n"))
+    return Crypto.sha256_hex(table.concat({ "document-key-v2", path,
+        tostring(attr.size), tostring(attr.modification), tostring(engine) }, "\n"))
 end
 
 function Store:commitChapter(book_id, uid, source, document_key, projection)

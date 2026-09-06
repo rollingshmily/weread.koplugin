@@ -1,6 +1,6 @@
 package.path = "./?.lua;" .. package.path
 local helper = require("spec.helpers.annotation_test_store")
-local scheduled, shown, notices, progress_titles, prevented, allowed = {}, {}, {}, {}, 0, 0
+local scheduled, shown, notices, progress_titles, progress_updates, prevented, allowed = {}, {}, {}, {}, {}, 0, 0
 package.preload["ui/uimanager"] = function()
     return {
         scheduleIn = function(_self, _delay, callback) scheduled[#scheduled + 1] = callback end,
@@ -15,8 +15,17 @@ package.preload["ui/widget/confirmbox"] = function() return { new = function(_se
 package.preload["weread.ui.download_dialog"] = function()
     return { new = function(_self, args)
         args.show = function() end; args.close = function() end
-        args.setTitle = function(_dialog, title) progress_titles[#progress_titles + 1] = title end
-        args.reportProgress = function() end
+        args.setTitle = function(dialog, title)
+            dialog.current_title = title
+            progress_titles[#progress_titles + 1] = title
+            progress_updates[#progress_updates + 1] = {
+                title = title,
+                progress = dialog.current_progress,
+            }
+        end
+        args.reportProgress = function(dialog, progress)
+            dialog.current_progress = progress
+        end
         return args
     end }
 end
@@ -115,6 +124,16 @@ assert(titles:find("Downloading thoughts 1/1 · chapter 1/1", 1, true),
     "thought download progress did not expose item counts")
 assert(titles:find("Matching underlines 1/1 · chapter 1/1", 1, true),
     "matching progress did not expose item counts")
+local thought_progress_moved = false
+for _, update in ipairs(progress_updates) do
+    if update.title == "Downloading thoughts 1/1 · chapter 1/1"
+        and update.progress == 0.5 then
+        thought_progress_moved = true
+        break
+    end
+end
+assert(thought_progress_moved,
+    "thought item progress did not advance the chapter progress bar")
 -- Cancel before a queued request and ensure stale callbacks cannot run.
 host:_runAnnotationJob(context, { refresh = true })
 host:_cancelUnifiedAnnotationSync()
