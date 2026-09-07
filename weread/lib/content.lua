@@ -4,6 +4,11 @@ local WeRead = require("weread.lib.protocol")
 local Thoughts = require("weread.lib.thoughts")
 local bit = require("bit")
 local logger = require("weread.lib.logger")
+local Checkpoint = require("weread.lib.download_checkpoint")
+local ok_ffiutil, ffiutil = pcall(require, "ffi/util")
+if not ok_ffiutil then ffiutil = nil end
+local ok_socket, socket = pcall(require, "socket")
+if not ok_socket then socket = nil end
 
 local Content = {}
 
@@ -463,11 +468,29 @@ function Content.cleanup_stale_downloads(settings)
             dirs[dir:gsub("/+$", "")] = true
         end
     end
+    local function has_resume_checkpoint(workspace_path)
+        for book_id, book in pairs(settings:get("books", {}) or {}) do
+            local checkpoint_path = Checkpoint.path(settings, book_id)
+            local file = io.open(checkpoint_path, "rb")
+            local encoded = file and file:read("*a")
+            if file then file:close() end
+            if encoded and encoded:find(workspace_path, 1, true) then
+                return true
+            end
+        end
+        return false
+    end
     local removed = 0
     for dir in pairs(dirs) do
         if lfs.attributes(dir, "mode") == "directory" then
             for name in lfs.dir(dir) do
                 if name:match("^%.weread%-download%-%d+%-%d+$") then
+                    local candidate = dir .. "/" .. name
+                    if not has_resume_checkpoint(candidate) then
+                        local cleaned = remove_tree(candidate)
+                        if cleaned then removed = removed + 1 end
+                    end
+                elseif name:match("^%.weread%-download%-build%-%d+%-%d+$") then
                     local cleaned = remove_tree(dir .. "/" .. name)
                     if cleaned then removed = removed + 1 end
                 elseif name:match("%.epub%.part$") then
@@ -558,18 +581,27 @@ local function write_epub(path, entries)
     end
 end
 
+local function image_href(workspace, filename)
+    local prefix = workspace and workspace.asset_prefix
+    if prefix and prefix ~= "" then
+        return "images/" .. prefix .. "/" .. filename
+    end
+    return "images/" .. filename
+end
+
 local function append_asset_entries(entries, assets)
-    local disk_dir
+    local disk_dirs = {}
     for _, asset in ipairs(assets or {}) do
         if asset.path then
             local parent = asset.path:match("^(.*)/[^/]+$")
             if not parent then
                 error("invalid file-backed asset path: " .. tostring(asset.path))
             end
-            if disk_dir and disk_dir ~= parent then
-                error("file-backed EPUB assets must share one directory")
+            local virtual_dir = asset.href:match("^(.*)/[^/]+$") or "images"
+            if disk_dirs[virtual_dir] and disk_dirs[virtual_dir] ~= parent then
+                error("file-backed EPUB assets must share one directory per virtual path")
             end
-            disk_dir = parent
+            disk_dirs[virtual_dir] = parent
         else
             table.insert(entries, {
                 name = "OEBPS/" .. asset.href,
@@ -578,13 +610,9 @@ local function append_asset_entries(entries, assets)
             })
         end
     end
-    if disk_dir then
-        -- KOReader's libarchive wrapper is reliable for a directory tree, but
-        -- some Kindle builds fail when addPath is given an individual file.
-        -- All disk-backed images are staged together, so stream the directory
-        -- into the EPUB with one reader lifecycle.
+    for virtual_dir, disk_dir in pairs(disk_dirs) do
         table.insert(entries, {
-            name = "OEBPS/images",
+            name = "OEBPS/" .. virtual_dir,
             path = disk_dir,
             recursive = true,
         })
@@ -931,6 +959,142 @@ function Content.save_chapter_epub(settings, book, chapter, xhtml, assets, css)
     return path
 end
 
+function Content.save_book_epub_from_files(settings, book, chapters, body_files,
+    assets, css, cover_data)
+    local book_id = book.book_id or book.bookId
+    Content.ensure_book_meta_dir(settings, book_id, book)
+    local book_title = book.title or "WeRead"
+    local path = Content.book_content_epub_path(settings, book, "full")
+    local author = book.author or "WeRead"
+    local root = Content.book_resolved_dir(settings, book_id, book)
+        .. string.format("/.weread-download-build-%d-%d", os.time(), math.random(100000, 999999))
+    local text_dir = root .. "/text"
+    make_path(text_dir)
+
+    local function cleanup()
+        local ok, ffiutil = pcall(require, "ffi/util")
+        if ok and ffiutil and ffiutil.purgeDir then
+            pcall(ffiutil.purgeDir, root)
+        else
+            os.execute("rm -rf " .. string.format("%q", root))
+        end
+    end
+    local function read_text(file_path)
+        local file, err = io.open(file_path, "rb")
+        if not file then error(err or ("missing chapter file: " .. tostring(file_path))) end
+        local text = file:read("*a")
+        file:close()
+        return text
+    end
+    local function write_text(file_path, text)
+        local file, err = io.open(file_path, "wb")
+        if not file then error(err or ("could not write: " .. file_path)) end
+        local ok, write_err = file:write(text)
+        file:close()
+        if not ok then error(write_err or ("could not write: " .. file_path)) end
+    end
+
+    local manifest_items = {
+        [[<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>]],
+        [[<item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>]],
+        [[<item id="style" href="style.css" media-type="text/css"/>]],
+    }
+    local spine_items = {}
+    local entries = {
+        { name = "mimetype", data = "application/epub+zip" },
+        { name = "META-INF/container.xml", data = [[<?xml version="1.0" encoding="utf-8"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>]] },
+    }
+    local cover_meta = ""
+    if cover_data and #cover_data > 0 then
+        local ext, mime = media_type_for(cover_data)
+        local cover_img_href = "images/cover" .. ext
+        table.insert(entries, { name = "OEBPS/" .. cover_img_href, data = cover_data })
+        table.insert(manifest_items, [[<item id="cover-image" href="]] .. cover_img_href .. [[" media-type="]] .. mime .. [[" properties="cover-image"/>]])
+        table.insert(manifest_items, [[<item id="cover" href="text/cover.xhtml" media-type="application/xhtml+xml"/>]])
+        table.insert(spine_items, [[<itemref idref="cover"/>]])
+        write_text(text_dir .. "/cover.xhtml", [[<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="zh-CN">
+<head><title>Cover</title><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;}img{display:block;width:100%;height:100%;object-fit:contain;}</style></head>
+<body><img src="../]] .. cover_img_href .. [[" alt="Cover"/></body>
+</html>]])
+        cover_meta = [[
+<meta name="cover" content="cover-image"/>]]
+    end
+
+    for asset_index, asset in ipairs(assets or {}) do
+        table.insert(manifest_items, [[<item id="asset_]] .. tostring(asset_index) .. [[" href="]] .. xml_escape(asset.href) .. [[" media-type="]] .. xml_escape(asset.media_type) .. [["/>]])
+    end
+    append_asset_entries(entries, assets)
+
+    for chapter_index, chapter in ipairs(chapters or {}) do
+        local uid = tostring(chapter.chapterUid or chapter_index)
+        local filename = string.format("chapter-%03d.xhtml", chapter_index)
+        local id = item_id("chapter_", uid)
+        local title = chapter.title or ("Chapter " .. uid)
+        local source_path = body_files and body_files[uid]
+        if not source_path then
+            error("missing checkpoint path for chapter " .. uid)
+        end
+        local chapter_xhtml = [[<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="zh-CN">
+<head><title>]] .. xml_escape(title) .. [[</title><link rel="stylesheet" type="text/css" href="../style.css"/></head>
+<body>
+]] .. body_fragment(read_text(source_path)) .. [[
+</body>
+</html>]]
+        write_text(text_dir .. "/" .. filename, chapter_xhtml)
+        table.insert(manifest_items, [[<item id="]] .. id .. [[" href="text/]] .. filename .. [[" media-type="application/xhtml+xml"/>]])
+        table.insert(spine_items, [[<itemref idref="]] .. id .. [["/>]])
+    end
+
+    local opf = [[<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid" version="3.0" prefix="dcterms: http://purl.org/dc/terms/">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dc:identifier id="bookid">weread-]] .. xml_escape(book_id) .. [[-full</dc:identifier>
+<dc:title>]] .. xml_escape(book_title) .. [[</dc:title>
+<dc:creator>]] .. xml_escape(author) .. [[</dc:creator>
+<dc:publisher>WeRead</dc:publisher>
+<dc:source>]] .. xml_escape(WeRead.reader_url(book_id)) .. [[</dc:source>
+<dc:language>zh-CN</dc:language>
+<meta property="dcterms:modified">]] .. utc_modified() .. [[</meta>]] .. cover_meta .. [[
+</metadata>
+<manifest>
+]] .. table.concat(manifest_items, "\n") .. [[
+</manifest>
+<spine toc="toc">
+]] .. table.concat(spine_items, "\n") .. [[
+</spine>
+</package>]]
+    local ncx_points = build_ncx_points(chapters, function(chapter_index)
+        return "text/" .. string.format("chapter-%03d.xhtml", chapter_index)
+    end)
+    local ncx = [[<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+<head><meta name="dtb:uid" content="weread-]] .. xml_escape(book_id) .. [[-full"/><meta name="dtb:depth" content="6"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head>
+<docTitle><text>]] .. xml_escape(book_title) .. [[</text></docTitle><navMap>
+]] .. ncx_points .. [[
+</navMap></ncx>]]
+    local nav = [[<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Navigation</title></head><body><nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><ol>
+]] .. build_nav_items(chapters, function(chapter_index)
+        return "text/" .. string.format("chapter-%03d.xhtml", chapter_index)
+    end) .. [[
+</ol></nav></body></html>]]
+    css = css or [[body { line-height: 1.7; margin: 5%; } img { max-width: 100%; }]]
+    table.insert(entries, { name = "OEBPS/content.opf", data = opf })
+    table.insert(entries, { name = "OEBPS/nav.xhtml", data = nav })
+    table.insert(entries, { name = "OEBPS/toc.ncx", data = ncx })
+    table.insert(entries, { name = "OEBPS/style.css", data = css })
+    table.insert(entries, { name = "OEBPS/text", path = text_dir, recursive = true })
+
+    local ok, err = pcall(write_epub, path, entries)
+    cleanup()
+    if not ok then error(err, 0) end
+    return path
+end
+
 function Content.save_book_epub(settings, book, chapters, chapter_bodies, suffix, assets, css, cover_data)
     local book_id = book.book_id or book.bookId
     Content.ensure_book_meta_dir(settings, book_id, book)
@@ -1121,7 +1285,7 @@ function Content.download_remote_images(client, xhtml, used_names, progress)
         end
         local seed = basename((url:match("^[^%?#]+") or url))
         local fname = unique_asset_name(used_names, seed ~= "" and seed or ("img" .. tostring(index)), ext)
-        local href = "images/" .. fname
+        local href = image_href(workspace, fname)
         remote_image_hrefs[url] = href
         table.insert(assets, {
             href = href,
@@ -1154,7 +1318,7 @@ function Content.download_chapter_assets(client, book, chapter, used_names)
         if media_type:match("^image/") then
             local stem = basename(entry.name)
             local filename = unique_asset_name(used_names, stem, ext)
-            local href = "images/" .. filename
+            local href = image_href(workspace, filename)
             local epub_relative = "../" .. href
             table.insert(assets, {
                 href = href,
@@ -1175,7 +1339,7 @@ local FILE_COPY_CHUNK_BYTES = 64 * 1024
 -- point it at a ZIP archive instead. KOReader already ships libarchive, so use
 -- its format auto-detection for those resources while keeping the small TAR
 -- reader below for the common streaming path.
-local function extract_zip_images(archive_path, asset_dir, used_names)
+local function extract_zip_images(archive_path, asset_dir, used_names, workspace)
     local Archiver = require("ffi/archiver")
     local archive = Archiver.Reader:new()
     local assets = {}
@@ -1197,7 +1361,7 @@ local function extract_zip_images(archive_path, asset_dir, used_names)
                 if media_type:match("^image/") then
                     local stem = basename(entry.path)
                     local filename = unique_asset_name(used_names, stem, ext)
-                    local href = "images/" .. filename
+                    local href = image_href(workspace, filename)
                     local asset = { href = href, media_type = media_type }
                     if asset_dir then
                         local output = assert(io.open(asset_dir .. "/" .. filename, "wb"))
@@ -1222,7 +1386,7 @@ local function extract_zip_images(archive_path, asset_dir, used_names)
     return assets, src_map
 end
 
-local function extract_tar_images(tar_path, asset_dir, used_names)
+local function extract_tar_images(tar_path, asset_dir, used_names, workspace)
     local input, open_err = io.open(tar_path, "rb")
     if not input then error(open_err or "could not open chapter resource archive") end
     local assets = {}
@@ -1266,7 +1430,7 @@ local function extract_tar_images(tar_path, asset_dir, used_names)
             if output then
                 output:close()
                 output = nil
-                local href = "images/" .. filename
+                local href = image_href(workspace, filename)
                 table.insert(assets, {
                     href = href,
                     media_type = media_type,
@@ -1315,7 +1479,7 @@ function Content.download_chapter_assets_to_files(client, book, chapter, used_na
     local extractor = signature:sub(1, 2) == "PK"
         and extract_zip_images or extract_tar_images
     local ok, assets, src_map = pcall(
-        extractor, tar_path, workspace.asset_dir, used_names)
+        extractor, tar_path, workspace.asset_dir, used_names, workspace)
     pcall(os.remove, tar_path)
     if not ok then error(assets, 0) end
     return assets, src_map
@@ -1371,7 +1535,7 @@ function Content.download_remote_images_to_files(client, xhtml, used_names, work
         local file = io.open(output_path, "rb")
         local size = file and file:seek("end") or 0
         if file then file:close() end
-        local href = "images/" .. fname
+        local href = image_href(workspace, fname)
         remote_image_hrefs[url] = href
         table.insert(assets, {
             href = href,
@@ -1467,6 +1631,135 @@ function Content.fetch_chapter_shard(client, _settings, book, chapter, endpoint)
     return text
 end
 
+-- Fetch the three body shards concurrently when KOReader exposes its
+-- subprocess primitive. Large responses stay on disk; only a tiny JSON status
+-- crosses the pipe. The sequential path remains the compatibility fallback.
+function Content.fetch_chapter_xhtml_parallel(client, settings, book, chapter, state)
+    if not ffiutil or type(ffiutil.runInSubProcess) ~= "function"
+        or type(ffiutil.isSubProcessDone) ~= "function"
+        or type(ffiutil.writeToFD) ~= "function"
+        or type(ffiutil.readAllFromFD) ~= "function" then
+        return Content.fetch_chapter_xhtml(client, settings, book, chapter, state)
+    end
+    if not (state and state.reader_state_ready and book.psvts) then
+        Content.refresh_reader_state(client, book, chapter)
+        if state then state.reader_state_ready = true end
+    end
+
+    local book_id = book.book_id or book.bookId
+    local root = state and state.workspace and state.workspace.path
+        or Content.book_resolved_dir(settings, book_id, book)
+    local dir = root .. string.format("/.weread-shards-%d-%d", os.time(), math.random(100000, 999999))
+    make_path(dir)
+    local endpoints = { "/web/book/chapter/e_0", "/web/book/chapter/e_1", "/web/book/chapter/e_3" }
+    local jobs = {}
+    local function send_status(fd, status)
+        local ok, encoded = pcall(client.json_encode, client, status)
+        if not ok then encoded = "{}" end
+        ffiutil.writeToFD(fd, encoded, true)
+    end
+    local function read_file(path)
+        local file, err = io.open(path, "rb")
+        if not file then error(err or ("missing shard file: " .. path)) end
+        local data = file:read("*a")
+        file:close()
+        return data
+    end
+
+    local launch_ok, launch_err = pcall(function()
+        for _i, endpoint in ipairs(endpoints) do
+            local shard_path = dir .. "/shard-" .. tostring(_i)
+            local pid, read_fd = ffiutil.runInSubProcess(function(_pid, write_fd)
+                local ok, result = pcall(function()
+                    local text = Content.fetch_chapter_shard(
+                        client, settings, book, chapter, endpoint)
+                    local file, err = io.open(shard_path, "wb")
+                    if not file then error(err or "could not create shard file") end
+                    local write_ok, write_err = file:write(text)
+                    file:close()
+                    if not write_ok then error(write_err or "could not write shard file") end
+                end)
+                if ok then
+                    send_status(write_fd, { ok = true })
+                else
+                    send_status(write_fd, { ok = false, error = tostring(result) })
+                end
+            end, true)
+            if not pid then error(read_fd or "could not start shard worker") end
+            jobs[#jobs + 1] = {
+                endpoint = endpoint,
+                path = shard_path,
+                pid = pid,
+                read_fd = read_fd,
+            }
+        end
+    end)
+    if not launch_ok then
+        for _i, job in ipairs(jobs) do
+            if ffiutil.terminateSubProcess then pcall(ffiutil.terminateSubProcess, job.pid) end
+        end
+        os.execute("rm -rf " .. string.format("%q", dir))
+        error(launch_err, 0)
+    end
+
+    local pending = #jobs
+    local deadline = os.time() + 90
+    while pending > 0 do
+        for _i, job in ipairs(jobs) do
+            if not job.done then
+                local done = ffiutil.isSubProcessDone(job.pid)
+                local readable = type(ffiutil.getNonBlockingReadSize) == "function"
+                    and ffiutil.getNonBlockingReadSize(job.read_fd) or 0
+                if done or readable > 0 then
+                    local payload = ffiutil.readAllFromFD(job.read_fd) or ""
+                    local decoded_ok, status = pcall(
+                        client.json_decode, client, payload)
+                    if not decoded_ok or type(status) ~= "table" or status.ok ~= true then
+                        for _j, other in ipairs(jobs) do
+                            if not other.done and ffiutil.terminateSubProcess then
+                                pcall(ffiutil.terminateSubProcess, other.pid)
+                            end
+                        end
+                        os.execute("rm -rf " .. string.format("%q", dir))
+                        error((type(status) == "table" and status.error)
+                            or "chapter shard worker failed")
+                    end
+                    job.done = true
+                    pending = pending - 1
+                end
+            end
+        end
+        if pending > 0 then
+            if os.time() >= deadline then
+                for _i, job in ipairs(jobs) do
+                    if not job.done and ffiutil.terminateSubProcess then
+                        pcall(ffiutil.terminateSubProcess, job.pid)
+                    end
+                end
+                os.execute("rm -rf " .. string.format("%q", dir))
+                error("chapter shard workers timed out")
+            end
+            if socket and socket.sleep then socket.sleep(0.05) end
+        end
+    end
+
+    local result = {}
+    for _i, job in ipairs(jobs) do
+        result[job.endpoint] = read_file(job.path)
+    end
+    os.execute("rm -rf " .. string.format("%q", dir))
+    local e0 = result["/web/book/chapter/e_0"]
+    if e0:sub(1, 1) == "{" and e0:find('"bookId"', 1, true) then
+        book._content_format = "txt"
+        return Content.fetch_txt_as_xhtml(client, settings, book, chapter)
+    end
+    book._content_format = "epub"
+    return Content.decode_content_shards(
+        e0,
+        result["/web/book/chapter/e_1"],
+        result["/web/book/chapter/e_3"])
+end
+
 function Content.txt_to_xhtml(text)
     text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
     local parts = {}
@@ -1489,8 +1782,11 @@ function Content.fetch_txt_as_xhtml(client, settings, book, chapter)
     return Content.txt_to_xhtml(plain)
 end
 
-function Content.fetch_chapter_xhtml(client, settings, book, chapter)
-    Content.refresh_reader_state(client, book, chapter)
+function Content.fetch_chapter_xhtml(client, settings, book, chapter, state)
+    if not (state and state.reader_state_ready and book.psvts) then
+        Content.refresh_reader_state(client, book, chapter)
+        if state then state.reader_state_ready = true end
+    end
 
     if book._content_format == "txt" then
         return Content.fetch_txt_as_xhtml(client, settings, book, chapter)
@@ -1631,7 +1927,7 @@ end
 
 function Content.fetch_single_chapter_content(client, settings, book, chapter, state)
     state = state or {}
-    local xhtml = Content.fetch_chapter_xhtml(client, settings, book, chapter)
+    local xhtml = Content.fetch_chapter_xhtml(client, settings, book, chapter, state)
     if not state.css then
         state.css = Content.fetch_chapter_css(client, settings, book, chapter)
     end
@@ -1658,7 +1954,13 @@ end
 -- thought batches cooperatively instead of blocking inside Thoughts.apply().
 function Content.fetch_single_chapter_source(client, settings, book, chapter, state)
     state = state or {}
-    local xhtml = Content.fetch_chapter_xhtml(client, settings, book, chapter)
+    local xhtml
+    if state.parallel_shards then
+        xhtml = Content.fetch_chapter_xhtml_parallel(
+            client, settings, book, chapter, state)
+    else
+        xhtml = Content.fetch_chapter_xhtml(client, settings, book, chapter, state)
+    end
     if not state.css then
         state.css = Content.fetch_chapter_css(client, settings, book, chapter)
     end
@@ -2172,7 +2474,7 @@ function Content.download_mp_images(client, body_html, progress, embed_base64)
             return "src=" .. quote .. "data:" .. mt .. ";base64," .. b64 .. quote
         end
         local fname = unique_asset_name(used_names, "img" .. tostring(index), ext)
-        local href = "images/" .. fname
+        local href = image_href(workspace, fname)
         table.insert(assets, {
             href = href,
             media_type = mt,

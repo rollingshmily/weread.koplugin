@@ -40,6 +40,7 @@ local defaults = {
         book_footnotes_in_popup = false,
         download_underlines_and_thoughts = false,
         prefetch_annotations = false,
+        chapter_concurrency = 2,
         auto_prefetch_next_chapter = false,
         show_prefetch_notifications = true,
         show_annotations = true,
@@ -166,6 +167,13 @@ function Settings:new()
     if cache.prefetch_annotations == nil then
         cache.prefetch_annotations = false
         cache_changed = true
+    end
+    local chapter_concurrency = tonumber(cache.chapter_concurrency)
+    if not chapter_concurrency or chapter_concurrency < 1 or chapter_concurrency > 4 then
+        cache.chapter_concurrency = 2
+        cache_changed = true
+    else
+        cache.chapter_concurrency = math.floor(chapter_concurrency)
     end
     if cache.auto_prefetch_next_chapter == nil then
         cache.auto_prefetch_next_chapter = false

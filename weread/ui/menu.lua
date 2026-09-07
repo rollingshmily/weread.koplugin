@@ -373,6 +373,16 @@ function M:getSettingsMenuItems()
                         end),
                     },
                     {
+                        text_func = function()
+                            local concurrency = tonumber(self.settings:get("cache").chapter_concurrency) or 2
+                            return T(_("Chapter concurrency: %1"), math.floor(concurrency))
+                        end,
+                        keep_menu_open = true,
+                        callback = self:safeCallback(_("Chapter concurrency"), function(touchmenu_instance)
+                            self:showChapterConcurrencyPicker(touchmenu_instance)
+                        end),
+                    },
+                    {
                         text = _("Public account article images"),
                         keep_menu_open = true,
                         checked_func = function()
@@ -1009,6 +1019,48 @@ function M:showEdgeTapRatioPicker(touchmenu_instance)
         buttons = buttons,
     }
     UIManager:show(self._edge_ratio_dialog)
+end
+
+function M:showChapterConcurrencyPicker(touchmenu_instance)
+    local cache = self.settings:get("cache")
+    local current = tonumber(cache.chapter_concurrency) or 2
+    local buttons = {}
+    for concurrency = 1, 4 do
+        local label = tostring(concurrency)
+        if concurrency == math.floor(current) then label = label .. "  ✓" end
+        table.insert(buttons, {
+            {
+                text = label,
+                callback = function()
+                    UIManager:close(self._chapter_concurrency_dialog)
+                    self._chapter_concurrency_dialog = nil
+                    local updated = self.settings:get("cache")
+                    updated.chapter_concurrency = concurrency
+                    self.settings:set("cache", updated)
+                    self.settings:flush()
+                    logger.info("chapter_concurrency changed:",
+                        "value=", tostring(concurrency))
+                    if touchmenu_instance then
+                        touchmenu_instance:updateItems()
+                    end
+                end,
+            },
+        })
+    end
+    table.insert(buttons, {
+        {
+            text = _("Cancel"),
+            callback = function()
+                UIManager:close(self._chapter_concurrency_dialog)
+                self._chapter_concurrency_dialog = nil
+            end,
+        },
+    })
+    self._chapter_concurrency_dialog = ButtonDialog:new{
+        title = _("Chapter concurrency"),
+        buttons = buttons,
+    }
+    UIManager:show(self._chapter_concurrency_dialog)
 end
 
 return M

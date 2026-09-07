@@ -25,6 +25,11 @@ local StandbyGuard = require("weread.lib.standby_guard")
 local Thoughts = require("weread.lib.thoughts")
 local WeRead = require("weread.lib.protocol")
 local WorkerSettings = require("weread.lib.worker_settings")
+local Checkpoint = require("weread.lib.download_checkpoint")
+local ok_ffiutil, ffiutil = pcall(require, "ffi/util")
+if not ok_ffiutil then ffiutil = nil end
+local ok_socket, socket = pcall(require, "socket")
+if not ok_socket then socket = nil end
 
 local function _(text)
     return I18n.tr(text)
@@ -61,6 +66,348 @@ function Downloader:new(o)
     o = o or {}
     setmetatable(o, self)
     return o
+end
+
+function Downloader:_saveCheckpoint(dl)
+    if not dl or not dl.resume_enabled or not dl.checkpoint then
+        return true
+    end
+    dl.checkpoint.css = dl.state and dl.state.css or dl.checkpoint.css
+    local ok, err = Checkpoint.save(
+        self.client, dl.checkpoint_path, dl.checkpoint)
+    if not ok then
+        logger.warn("download checkpoint save failed:", log_error(err))
+    end
+    return ok
+end
+
+function Downloader:_restoreCheckpointChapter(dl, chapter, entry)
+    local uid = tostring(chapter.chapterUid or dl.index)
+    local source_path = entry and entry.source_path
+    local body = source_path and Checkpoint.read_chapter(source_path)
+    if not body then
+        logger.warn("download checkpoint chapter missing; redownloading:",
+            "chapter_uid=", uid)
+        if dl.checkpoint and dl.checkpoint.completed then
+            dl.checkpoint.completed[uid] = nil
+        end
+        return false
+    end
+    dl.body_files = dl.body_files or {}
+    dl.body_files[uid] = source_path
+    dl.bodies[uid] = nil
+    dl.assets_by_uid[uid] = entry.assets or {}
+    dl.state.used_asset_names = dl.state.used_asset_names or {}
+    for _i, asset in ipairs(entry.assets or {}) do
+        local asset_name = tostring(asset.href or ""):match("([^/]+)$")
+        if asset_name and asset_name ~= "" then
+            dl.state.used_asset_names[asset_name] = true
+        end
+        dl.assets[#dl.assets + 1] = asset
+        dl.asset_bytes = (dl.asset_bytes or 0) + (tonumber(asset.size) or 0)
+    end
+    dl.footnote_scans = dl.footnote_scans or {}
+    if entry.footnote_scan then
+        dl.footnote_scans[uid] = entry.footnote_scan
+    end
+    dl.selected[#dl.selected + 1] = chapter
+    dl.index = dl.index + 1
+    if dl.progress_dialog then
+        dl.progress_dialog:reportProgress(dl.index - 1)
+    end
+    logger.info("download checkpoint resumed:",
+        "chapter=", tostring(dl.index - 1) .. "/" .. tostring(dl.total),
+        "chapter_uid=", uid)
+    return true
+end
+
+function Downloader:_checkpointChapter(dl, chapter, xhtml, assets)
+    if not dl.resume_enabled then return true end
+    local uid = tostring(chapter.chapterUid or dl.index)
+    local source_path = Checkpoint.chapter_path(dl.workspace.path, uid)
+    local ok, err = Checkpoint.write_chapter(source_path, xhtml)
+    if not ok then
+        error(err or "could not checkpoint chapter")
+    end
+    dl.body_files = dl.body_files or {}
+    dl.body_files[uid] = source_path
+    dl.bodies[uid] = nil
+    dl.checkpoint.completed[uid] = {
+        uid = uid,
+        index = dl.index,
+        chapter = chapter,
+        source_path = source_path,
+        assets = assets or {},
+        footnote_scan = dl.footnote_scans and dl.footnote_scans[uid] or nil,
+    }
+    return self:_saveCheckpoint(dl)
+end
+
+function Downloader:_dispatchAccept(dl, index, chapter, status)
+    local uid = tostring(chapter.chapterUid or index)
+    local source_path = status.source_path
+        or Checkpoint.chapter_path(dl.workspace.path, uid)
+    if not Checkpoint.read_chapter(source_path) then
+        error("chapter worker produced no checkpoint: " .. uid)
+    end
+    local assets = status.assets or {}
+    dl.selected[index] = chapter
+    dl.body_files[uid] = source_path
+    dl.bodies[uid] = nil
+    dl.assets_by_uid[uid] = assets
+    for _i, asset in ipairs(assets) do
+        dl.assets[#dl.assets + 1] = asset
+        dl.asset_bytes = (dl.asset_bytes or 0) + (tonumber(asset.size) or 0)
+    end
+    if status.footnote_scan then
+        dl.footnote_scans[uid] = status.footnote_scan
+    end
+    if status.css and not dl.state.css then
+        dl.state.css = status.css
+    end
+    dl.checkpoint.completed[uid] = {
+        uid = uid,
+        index = index,
+        chapter = chapter,
+        source_path = source_path,
+        assets = assets,
+        footnote_scan = status.footnote_scan,
+    }
+    self:_saveCheckpoint(dl)
+    dl.dispatch_done[index] = true
+    dl.dispatch_done_count = dl.dispatch_done_count + 1
+end
+
+function Downloader:_dispatchLaunch(dl, index, attempt)
+    local chapter = dl.chapters[index]
+    local uid = tostring(chapter.chapterUid or index)
+    local worker_root = dl.workspace.path .. "/workers/" .. tostring(index)
+    local incoming_dir = worker_root .. "/incoming"
+    local asset_dir = worker_root .. "/images"
+    os.execute("mkdir -p " .. string.format("%q", incoming_dir)
+        .. " " .. string.format("%q", asset_dir))
+    local source_path = Checkpoint.chapter_path(dl.workspace.path, uid)
+    local client = self.client
+    local settings = self.settings
+    local worker_book = dl.book
+    local worker_state = {
+        workspace = {
+            path = dl.workspace.path,
+            incoming_dir = incoming_dir,
+            asset_dir = asset_dir,
+            asset_prefix = "chapter-" .. tostring(index),
+        },
+        parallel_shards = false,
+        reader_state_ready = true,
+    }
+    local pid, read_fd = ffiutil.runInSubProcess(function(_pid, write_fd)
+        local status
+        local ok, result = xpcall(function()
+            local xhtml = Content.fetch_single_chapter_source(
+                client, settings, worker_book, chapter, worker_state)
+            local final_xhtml, assets = Content.finalize_single_chapter_content(
+                client, settings, worker_book, chapter, xhtml, worker_state)
+            local scan_ok, scan = pcall(Footnotes.scan_chapter, final_xhtml, chapter)
+            local write_ok, write_err = Checkpoint.write_chapter(source_path, final_xhtml)
+            if not write_ok then error(write_err or "chapter checkpoint write failed") end
+            return {
+                ok = true,
+                source_path = source_path,
+                assets = assets or {},
+                css = worker_state.css,
+                footnote_scan = scan_ok and scan or nil,
+            }
+        end, debug.traceback)
+        if ok then
+            status = result
+        else
+            status = { ok = false, error = tostring(result) }
+        end
+        local encoded_ok, encoded = pcall(client.json_encode, client, status)
+        if encoded_ok and encoded then
+            ffiutil.writeToFD(write_fd, encoded)
+        end
+    end, true)
+    if not pid or not read_fd then
+        error("could not start chapter worker")
+    end
+    dl.dispatch_active[index] = {
+        pid = pid, read_fd = read_fd, attempt = attempt,
+        chapter = chapter, started_at = os.clock(),
+    }
+end
+
+function Downloader:_dispatchStep(dl)
+    if not ffiutil or not ffiutil.runInSubProcess then
+        dl.chapter_dispatch_enabled = false
+        return self:_step(dl)
+    end
+    if not dl.dispatch_initialized then
+        dl.dispatch_initialized = true
+        dl.dispatch_active = {}
+        dl.dispatch_done = {}
+        dl.dispatch_done_count = 0
+        dl.dispatch_attempts = {}
+        dl.dispatch_retry_at = {}
+        for index, chapter in ipairs(dl.chapters) do
+            local uid = tostring(chapter.chapterUid or index)
+            local entry = dl.checkpoint.completed[uid]
+            if entry and self:_restoreCheckpointForIndex(dl, index, chapter, entry) then
+                dl.dispatch_done[index] = true
+                dl.dispatch_done_count = dl.dispatch_done_count + 1
+            end
+        end
+    end
+
+    for index, job in pairs(dl.dispatch_active) do
+        local done = ffiutil.isSubProcessDone(job.pid)
+        local readable = not ffiutil.getNonBlockingReadSize
+            or ffiutil.getNonBlockingReadSize(job.read_fd) > 0
+        if done and readable then
+            local raw = ffiutil.readAllFromFD(job.read_fd) or ""
+            local ok, status = pcall(self.client.json_decode, self.client, raw)
+            dl.dispatch_active[index] = nil
+            if ok and status and status.ok then
+                self:_dispatchAccept(dl, index, job.chapter, status)
+            else
+                local attempts = (dl.dispatch_attempts[index] or 0) + 1
+                dl.dispatch_attempts[index] = attempts
+                if attempts < 3 then
+                    dl.dispatch_retry_at[index] = os.clock() + attempts
+                else
+                    dl.failed[#dl.failed + 1] = tostring(job.chapter.chapterUid or index)
+                    dl.dispatch_done[index] = true
+                    dl.dispatch_done_count = dl.dispatch_done_count + 1
+                    logger.warn("chapter worker failed:",
+                        tostring(job.chapter.chapterUid or index),
+                        ok and status and status.error or raw)
+                end
+            end
+        end
+    end
+
+    local active_count = 0
+    for _index in pairs(dl.dispatch_active) do active_count = active_count + 1 end
+    for index, chapter in ipairs(dl.chapters) do
+        if active_count >= dl.chapter_concurrency then break end
+        if not dl.dispatch_done[index] and not dl.dispatch_active[index]
+            and (not dl.dispatch_retry_at[index]
+                or os.clock() >= dl.dispatch_retry_at[index]) then
+            local attempt = (dl.dispatch_attempts[index] or 0) + 1
+            dl.dispatch_attempts[index] = attempt
+            self:_dispatchLaunch(dl, index, attempt)
+            active_count = active_count + 1
+        end
+    end
+
+    if dl.dispatch_done_count >= #dl.chapters and active_count == 0 then
+        dl.chapter_dispatch_enabled = false
+        dl.index = #dl.chapters + 1
+        return self:_scheduleGuarded(dl, function() self:_step(dl) end, 0)
+    end
+    self:_scheduleGuarded(dl, function() self:_step(dl) end, 0.1)
+end
+
+function Downloader:_restoreCheckpointForIndex(dl, index, chapter, entry)
+    local uid = tostring(chapter.chapterUid or index)
+    local source_path = entry and entry.source_path
+    if not source_path or not Checkpoint.read_chapter(source_path) then
+        if dl.checkpoint.completed then dl.checkpoint.completed[uid] = nil end
+        return false
+    end
+    dl.selected[index] = chapter
+    dl.body_files[uid] = source_path
+    dl.assets_by_uid[uid] = entry.assets or {}
+    for _i, asset in ipairs(entry.assets or {}) do
+        dl.assets[#dl.assets + 1] = asset
+        dl.asset_bytes = (dl.asset_bytes or 0) + (tonumber(asset.size) or 0)
+    end
+    if entry.footnote_scan then dl.footnote_scans[uid] = entry.footnote_scan end
+    if dl.checkpoint.css and not dl.state.css then dl.state.css = dl.checkpoint.css end
+    return true
+end
+
+function Downloader:_canBuildEpubInSubprocess(dl)
+    return dl.resume_enabled and ffiutil
+        and type(ffiutil.runInSubProcess) == "function"
+        and type(ffiutil.isSubProcessDone) == "function"
+        and type(ffiutil.readAllFromFD) == "function"
+        and type(ffiutil.writeToFD) == "function"
+end
+
+function Downloader:_startEpubBuild(dl)
+    local cover_data
+    local cover_url = WeRead.normalize_cover_url(dl.book.cover)
+    if cover_url and cover_url ~= "" then
+        pcall(function() cover_data = self.client:get_binary(cover_url) end)
+    end
+    local job = {
+        started_at = time.now(),
+        read_fd = nil,
+    }
+    local client = self.client
+    local settings = self.settings
+    local book = dl.book
+    local chapters = dl.selected
+    local body_files = dl.body_files
+    local assets = dl.assets
+    local css = dl.state.css
+    local pid, read_fd = ffiutil.runInSubProcess(function(_pid, write_fd)
+        local status
+        local ok, result = xpcall(function()
+            local path = Content.save_book_epub_from_files(
+                settings, book, chapters, body_files, assets, css, cover_data)
+            return { ok = true, path = path }
+        end, debug.traceback)
+        if ok then
+            status = result
+        else
+            status = { ok = false, error = tostring(result) }
+        end
+        local encoded_ok, encoded = pcall(client.json_encode, client, status)
+        if encoded_ok and encoded then
+            ffiutil.writeToFD(write_fd, encoded)
+        end
+    end, true)
+    if not pid or not read_fd then
+        error("could not start EPUB build worker")
+    end
+    job.pid = pid
+    job.read_fd = read_fd
+    dl.epub_build = job
+    self:_scheduleGuarded(dl, function() self:_pollEpubBuild(dl) end, 0.1)
+end
+
+function Downloader:_pollEpubBuild(dl)
+    local job = dl.epub_build
+    if not job then return end
+    if not ffiutil.isSubProcessDone(job.pid) then
+        return self:_scheduleGuarded(dl,
+            function() self:_pollEpubBuild(dl) end, 0.1)
+    end
+    local raw = ffiutil.readAllFromFD(job.read_fd) or ""
+    local ok, status = pcall(self.client.json_decode, self.client, raw)
+    dl.epub_build = nil
+    dl.epub_build_result = {
+        ok = ok and status and status.ok == true,
+        path = ok and status and status.path or nil,
+        error = ok and status and status.error or raw,
+        started_at = job.started_at,
+    }
+    self:_scheduleGuarded(dl, function() self:_step(dl) end, 0.1)
+end
+
+function Downloader:_stopDispatch(dl)
+    for _index, job in pairs(dl.dispatch_active or {}) do
+        if ffiutil and ffiutil.terminateSubProcess then
+            pcall(ffiutil.terminateSubProcess, job.pid)
+        end
+    end
+    if dl.epub_build and ffiutil and ffiutil.terminateSubProcess then
+        pcall(ffiutil.terminateSubProcess, dl.epub_build.pid)
+    end
+    dl.dispatch_active = {}
+    dl.epub_build = nil
 end
 
 function Downloader:recover()
@@ -480,6 +827,8 @@ function Downloader:start(book, chapters, suffix, options)
     end
 
     local total = #chapters
+    local configured_cache = self.settings.get
+        and self.settings:get("cache", {}) or {}
     local dl = {
         book = book,
         chapters = chapters,
@@ -488,9 +837,12 @@ function Downloader:start(book, chapters, suffix, options)
         cancelled = false,
         selected = {},
         bodies = {},
+        body_files = {},
         assets = {},
         assets_by_uid = {},
-        state = {},
+        state = {
+            parallel_shards = Content.fetch_chapter_xhtml_parallel ~= nil,
+        },
         total = total,
         failed = {},
         annotation_failed_batches = 0,
@@ -511,6 +863,21 @@ function Downloader:start(book, chapters, suffix, options)
         offer_read = options.offer_read ~= false,
         silent_completion = options.silent_completion == true,
         prefetch = options.prefetch == true,
+        resume_enabled = options.prefetch ~= true
+            and options.resume ~= false
+            and options.single_chapter ~= true
+            and options.separate_chapters ~= true
+            and (suffix or "book") == "full",
+        chapter_dispatch_enabled = options.prefetch ~= true
+            and options.chapter_dispatch ~= false
+            and not options.include_annotations
+            and options.single_chapter ~= true
+            and options.separate_chapters ~= true
+            and (suffix or "book") == "full"
+            and ffiutil and ffiutil.runInSubProcess ~= nil,
+        chapter_concurrency = math.min(4,
+            math.max(1, math.floor(tonumber(options.chapter_concurrency)
+                or tonumber(configured_cache.chapter_concurrency) or 2))),
         start_delay = tonumber(options.start_delay) or 0,
         on_start = options.on_start,
         on_complete = options.on_complete,
@@ -539,12 +906,50 @@ function Downloader:start(book, chapters, suffix, options)
         end
         local ok_init, err_init = pcall(function()
             Content.ensure_reader_state(self.client, book)
+            dl.state.reader_state_ready = true
             local cache = self.settings.get
                 and self.settings:get("cache", {}) or {}
-            if cache.download_book_images and Content.create_download_workspace then
+
+            if dl.resume_enabled then
+                dl.checkpoint_path = Checkpoint.path(self.settings, book)
+                local restored, restore_err = Checkpoint.load(
+                    self.client, dl.checkpoint_path,
+                    book.book_id or book.bookId, "full")
+                if restored and restored.workspace then
+                    local workspace = tostring(restored.workspace)
+                    dl.workspace = {
+                        path = workspace,
+                        incoming_dir = workspace .. "/incoming",
+                        asset_dir = workspace .. "/images",
+                    }
+                    dl.checkpoint = restored
+                    dl.checkpoint.completed = dl.checkpoint.completed or {}
+                    dl.state.workspace = dl.workspace
+                    dl.state.css = restored.css
+                    logger.info("resuming full-book download:",
+                        "completed=", tostring(#(dl.selected or {})))
+                elseif restore_err ~= "missing" then
+                    logger.warn("ignore invalid download checkpoint:",
+                        log_error(restore_err))
+                end
+            end
+
+            if not dl.workspace and (cache.download_book_images
+                or dl.resume_enabled) and Content.create_download_workspace then
                 dl.workspace = Content.create_download_workspace(
                     self.settings, book)
                 dl.state.workspace = dl.workspace
+            end
+            if dl.resume_enabled and not dl.checkpoint then
+                dl.checkpoint = {
+                    version = 1,
+                    book_id = book.book_id or book.bookId,
+                    suffix = "full",
+                    workspace = dl.workspace and dl.workspace.path,
+                    completed = {},
+                    css = dl.state.css,
+                }
+                self:_saveCheckpoint(dl)
             end
         end)
         if not ok_init then
@@ -686,6 +1091,7 @@ function Downloader:_footnoteStep(dl)
             dl.state.css = (dl.state.css or "") .. "\n"
                 .. Footnotes.get_css(job.use_popup)
         end
+        self:_saveCheckpoint(dl)
         logger.info("book footnotes processed:",
             "candidates=", tostring(dl.footnote_stats.candidates),
             "converted=", tostring(dl.footnote_stats.converted),
@@ -704,15 +1110,32 @@ function Downloader:_footnoteStep(dl)
         T(_("Processing footnotes · chapter %1/%2"),
             tostring(job.index), tostring(#dl.selected)), dl.total)
     local original = dl.bodies[uid]
+    if not original and dl.body_files then
+        original = Checkpoint.read_chapter(dl.body_files[uid])
+    end
     local started = time.now()
     local ok, transformed, stats = pcall(Footnotes.transform_chapter,
         original, dl.footnote_scans[uid], job.index_data)
     if ok then
         local valid, validation_error = Footnotes.validate(transformed)
         if valid then
-            dl.bodies[uid] = transformed
-            add_footnote_stats(dl.footnote_stats, stats)
-            if Footnotes.has_converted(stats) then job.css_needed = true end
+            if dl.body_files and dl.body_files[uid] then
+                local write_ok, write_err = Checkpoint.write_chapter(
+                    dl.body_files[uid], transformed)
+                if not write_ok then
+                    ok = false
+                    transformed = write_err
+                end
+            end
+            if ok then
+                if not (dl.body_files and dl.body_files[uid]) then
+                    dl.bodies[uid] = transformed
+                else
+                    dl.bodies[uid] = nil
+                end
+                add_footnote_stats(dl.footnote_stats, stats)
+                if Footnotes.has_converted(stats) then job.css_needed = true end
+            end
         else
             dl.footnote_stats.fallback = dl.footnote_stats.fallback + 1
             logger.warn("footnote transform validation failed; keeping original chapter:",
@@ -789,6 +1212,7 @@ function Downloader:_finishChapter(dl)
         table.insert(dl.assets, asset)
         dl.asset_bytes = (dl.asset_bytes or 0) + (tonumber(asset.size) or 0)
     end
+    self:_checkpointChapter(dl, chapter, xhtml, chapter_assets)
     logger.info("download assets staged:",
         "chapter=", tostring(dl.index) .. "/" .. tostring(dl.total),
         "chapter_assets=", tostring(#(chapter_assets or {})),
@@ -930,6 +1354,8 @@ end
 
 function Downloader:_step(dl)
     if dl.cancelled then
+        self:_stopDispatch(dl)
+        if dl.checkpoint_path then Checkpoint.remove(dl.checkpoint_path) end
         self:_releaseStandby(dl)
         self:_cleanupWorkspace(dl)
         self:_notifyCompletion(dl, false, dl.cancel_reason or "cancelled")
@@ -938,6 +1364,10 @@ function Downloader:_step(dl)
             self.show_transient(_("Download cancelled"), 2)
         end
         return
+    end
+
+    if dl.chapter_dispatch_enabled then
+        return self:_dispatchStep(dl)
     end
 
     if dl.index > dl.total then
@@ -987,8 +1417,23 @@ function Downloader:_step(dl)
             return
         end
         self:_setStage(dl, _("Building EPUB..."), dl.total)
+        if dl.epub_build then
+            return self:_pollEpubBuild(dl)
+        end
+        if self:_canBuildEpubInSubprocess(dl) and not dl.epub_build_result then
+            self:_startEpubBuild(dl)
+            return
+        end
         local save_started = time.now()
-        local ok, path, chapter_paths = pcall(function()
+        local ok, path, chapter_paths
+        if dl.epub_build_result then
+            local result = dl.epub_build_result
+            dl.epub_build_result = nil
+            save_started = result.started_at or save_started
+            ok, path, chapter_paths = result.ok, result.path, nil
+            if not ok then path = result.error or "EPUB build worker failed" end
+        else
+            ok, path, chapter_paths = pcall(function()
             if dl.single_chapter then
                 local chapter = dl.selected[1]
                 local uid = tostring(chapter.chapterUid or 1)
@@ -1015,14 +1460,21 @@ function Downloader:_step(dl)
             if cover_url and cover_url ~= "" then
                 pcall(function() cover_data = self.client:get_binary(cover_url) end)
             end
+            if dl.resume_enabled then
+                return Content.save_book_epub_from_files(
+                    self.settings, dl.book, dl.selected, dl.body_files,
+                    dl.assets, dl.state.css, cover_data)
+            end
             return Content.save_book_epub(
                 self.settings, dl.book, dl.selected, dl.bodies,
-                dl.suffix, dl.assets, dl.state.css, cover_data
-            )
-        end)
-        self:_cleanupWorkspace(dl)
+                dl.suffix, dl.assets, dl.state.css, cover_data)
+            end)
+        end
         self:_perf(dl, "save_epub", save_started, "ok=", tostring(ok),
             "single=", tostring(dl.single_chapter))
+        if ok or not dl.resume_enabled then
+            self:_cleanupWorkspace(dl)
+        end
         if dl.progress_dialog then
             dl.progress_dialog:close()
             dl.progress_dialog = nil
@@ -1082,6 +1534,9 @@ function Downloader:_step(dl)
                 self.show_info(T(_("Download failed:\n%1"), display_error(path)))
             end
             return
+        end
+        if dl.resume_enabled and dl.checkpoint_path then
+            Checkpoint.remove(dl.checkpoint_path)
         end
         if #dl.failed > 0 then
             logger.warn(
@@ -1153,6 +1608,14 @@ function Downloader:_step(dl)
     end
 
     local chapter = dl.chapters[dl.index]
+    if dl.resume_enabled and dl.checkpoint and dl.checkpoint.completed then
+        local uid = tostring(chapter.chapterUid or dl.index)
+        local entry = dl.checkpoint.completed[uid]
+        if entry and self:_restoreCheckpointChapter(dl, chapter, entry) then
+            self:_scheduleGuarded(dl, function() self:_step(dl) end)
+            return
+        end
+    end
     self:_setStage(dl,
         T(_("Downloading chapter %1/%2: %3"), tostring(dl.index), tostring(dl.total),
             chapter.title or tostring(chapter.chapterUid)),

@@ -20,6 +20,9 @@ package.preload["weread.lib.protocol"] = function()
     }
 end
 package.preload["weread.lib.thoughts"] = function() return {} end
+package.preload["bit"] = function()
+    return { rshift = function(value, bits) return math.floor(value / 2 ^ bits) end }
+end
 
 local archive_calls = {}
 local archive_should_fail = false
@@ -230,6 +233,28 @@ expect(opf:find(
     "book introduction was not safely embedded as dc:description")
 expect(opf:find("\0", 1, true) == nil and opf:find("\1", 1, true) == nil,
     "XML-illegal control characters remained in the OPF metadata")
+
+local text_dir = root .. "/checkpoint-text"
+assert(os.execute("mkdir -p " .. string.format("%q", text_dir)))
+local body_file = text_dir .. "/7.xhtml"
+local body_handle = assert(io.open(body_file, "wb"))
+body_handle:write("<p>streamed body</p>")
+body_handle:close()
+archive_should_fail = false
+local streamed_output = Content.save_book_epub_from_files(settings,
+    { book_id = "book", title = "Streamed" },
+    { { chapterUid = 7, title = "Chapter" } },
+    { ["7"] = body_file }, {}, "body{}")
+expect(streamed_output and io.open(streamed_output, "rb") ~= nil,
+    "streaming EPUB output was not created")
+local streamed_text_path = false
+for _i, call in ipairs(archive_calls) do
+    if call.kind == "path" and call.name == "OEBPS/text"
+        and call.recursive == true then
+        streamed_text_path = true
+    end
+end
+expect(streamed_text_path, "streaming EPUB did not add chapter text as a directory")
 
 local old = assert(io.open(output, "wb"))
 old:write("known-good-old-epub")
