@@ -870,4 +870,109 @@ function Client:get_review_comments(review_id, count, opts)
     end
     return true, parsed, nil
 end
+
+local Eink = require("weread.lib.eink")
+
+function Client:eink_credentials()
+    local eink = self.settings:get("eink", {}) or {}
+    local cookies = self.settings:get("cookies", {}) or {}
+    local vid = tostring(eink.vid or cookies.wr_vid or "")
+    local token = tostring(eink.access_token or cookies.wr_skey or "")
+    if vid == "" or token == "" then
+        return nil
+    end
+    return vid, token
+end
+
+function Client:can_eink_download()
+    return self:eink_credentials() ~= nil
+end
+
+function Client:eink_request(path, params)
+    local vid, token = self:eink_credentials()
+    if not vid then
+        error("eink credentials are missing")
+    end
+    local query = {}
+    for key, value in pairs(params or {}) do
+        query[#query + 1] = WeRead.urlencode(tostring(key)) .. "=" .. WeRead.urlencode(tostring(value))
+    end
+    table.sort(query)
+    local url = "https://i.weread.qq.com" .. path
+    if #query > 0 then
+        url = url .. "?" .. table.concat(query, "&")
+    end
+    local body, code, headers = self:request({
+        url = url,
+        method = "GET",
+        skip_cookie = true,
+        persist_response_cookies = false,
+        timeout = { 30, 180 },
+        headers = {
+            ["User-Agent"] = Eink.USER_AGENT,
+            ["Accept"] = "*/*",
+            ["vid"] = vid,
+            ["accessToken"] = token,
+            ["appver"] = Eink.APPVER,
+            ["basever"] = Eink.APPVER,
+            ["baseapi"] = "30",
+            ["osver"] = "11",
+            ["channelId"] = "900",
+        },
+        diagnostic_api = path,
+    })
+    return body, code, headers or {}
+end
+
+function Client:eink_chapterinfo(book_id)
+    local body, code = self:eink_request("/book/chapterinfo", { bookId = tostring(book_id) })
+    if not code or code < 200 or code >= 300 then
+        error("eink chapterinfo failed: HTTP " .. tostring(code or "unknown"))
+    end
+    return self:decode_http_json(body, {
+        method = "GET",
+        url = "/book/chapterinfo",
+        code = code,
+    })
+end
+
+function Client:eink_bookmarklist(book_id)
+    book_id = tostring(book_id or "")
+    self._eink_bookmark_cache = self._eink_bookmark_cache or {}
+    if self._eink_bookmark_cache[book_id] then
+        return self._eink_bookmark_cache[book_id]
+    end
+    local body, code = self:eink_request("/book/bookmarklist", { bookId = book_id })
+    if not code or code < 200 or code >= 300 then
+        error("eink bookmarklist failed: HTTP " .. tostring(code or "unknown"))
+    end
+    local data = self:decode_http_json(body, {
+        method = "GET",
+        url = "/book/bookmarklist",
+        code = code,
+    })
+    self._eink_bookmark_cache[book_id] = data
+    return data
+end
+
+function Client:eink_download_zip(book_id, chapters_param)
+    local vid = self:eink_credentials()
+    local body, code, headers = self:eink_request("/book/chapterdownload", {
+        bookId = tostring(book_id),
+        chapters = tostring(chapters_param),
+    })
+    if not code or code < 200 or code >= 300 then
+        error("eink chapterdownload failed: HTTP " .. tostring(code or "unknown"))
+    end
+    if type(body) ~= "string" or body:sub(1, 2) ~= "PK" then
+        error("eink chapterdownload did not return a ZIP")
+    end
+    local encrypt_key = header_value(headers, "encryptKey") or header_value(headers, "encryptkey")
+    if not encrypt_key or encrypt_key == "" then
+        error("eink chapterdownload missing encryptKey header")
+    end
+    local password = Eink.decrypt_zip_password(encrypt_key, vid)
+    return Eink.unzip_encrypted(body, password)
+end
+
 return Client

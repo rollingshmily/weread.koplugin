@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.19]
+
+### 墨水屏 ZIP 下载（兼容旧 Web 通道）
+
+- 新增 eink 原生下载：一次 `chapterdownload` 拉取加密 ZIP，用响应头 `encryptKey` + vid AES 解密后组装 EPUB。
+- 现有 Web Cookie / Skill API Key / `e_0` 碎片下载全部保留；eink 失败自动回退 web worker。
+- 已有 `wr_vid` + `wr_skey` 即可走快路径，不必强制第二套扫码。
+- 划线优先一次拉取 `/book/bookmarklist`，再按章回退 gateway。
+- 整本下载 worker 路径会先尝试 ZIP 写入检查点，未命中章节再走 web worker。
+
+### 验证
+
+- Lua spec 需全绿。
+- luacheck：0 warnings / 0 errors。
+
 ## [1.2.18]
 
 ### 下载暂停与继续

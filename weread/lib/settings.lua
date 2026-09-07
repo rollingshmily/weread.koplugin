@@ -18,6 +18,13 @@ local defaults = {
     auth_schema_version = Settings.AUTH_SCHEMA_VERSION,
     api_key = "",
     cookies = {},
+    eink = {
+        vid = "",
+        access_token = "",
+        refresh_token = "",
+        device_id = "",
+        skey = "",
+    },
     wr_ticket = "",
     wr_wrpa = "",
     account = {
@@ -117,6 +124,7 @@ end
 local function clear_auth_store(store)
     store:saveSetting("api_key", "")
     store:saveSetting("cookies", {})
+    store:saveSetting("eink", deepcopy(defaults.eink))
     store:saveSetting("wr_ticket", "")
     store:saveSetting("wr_wrpa", "")
     store:saveSetting("account", deepcopy(defaults.account))
@@ -382,6 +390,16 @@ function Settings:update_auth(credentials, options)
             changed = true
         end
     end
+    if type(credentials.eink) == "table" then
+        local eink = deepcopy(self:get("eink", deepcopy(defaults.eink)))
+        for key, value in pairs(credentials.eink) do
+            if type(value) == "string" then
+                eink[key] = value
+            end
+        end
+        self:set("eink", eink)
+        changed = true
+    end
     if type(credentials.account) == "table" then
         self:set("account", deepcopy(credentials.account))
         changed = true
@@ -468,6 +486,18 @@ end
 
 function Settings:is_api_configured()
     return self:get("api_key", "") ~= ""
+end
+
+function Settings:is_eink_configured()
+    local eink = self:get("eink", {}) or {}
+    local cookies = self:get("cookies", {}) or {}
+    local vid = tostring(eink.vid or cookies.wr_vid or "")
+    local token = tostring(eink.access_token or cookies.wr_skey or "")
+    return vid ~= "" and token ~= ""
+end
+
+function Settings:has_download_auth()
+    return self:is_cookie_configured() or self:is_eink_configured()
 end
 
 return Settings

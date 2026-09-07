@@ -1,4 +1,5 @@
 local Crypto = require("weread.lib.crypto")
+local Eink = require("weread.lib.eink")
 local ReaderState = require("weread.lib.reader_state")
 local WeRead = require("weread.lib.protocol")
 local Thoughts = require("weread.lib.thoughts")
@@ -2001,8 +2002,83 @@ function Content.finalize_single_chapter_content(client, settings, book, chapter
     return xhtml, chapter_assets
 end
 
+local function ensure_eink_chapter_files(client, book, chapters)
+    local missing = false
+    for _, chapter in ipairs(chapters or {}) do
+        if type(chapter.files) ~= "table" or not chapter.files[1] then
+            missing = true
+            break
+        end
+    end
+    if not missing then
+        return chapters
+    end
+    local info = client:eink_chapterinfo(book.book_id or book.bookId)
+    local files_by_uid = {}
+    for _, chapter in ipairs(info.chapters or {}) do
+        files_by_uid[tostring(chapter.chapterUid)] = chapter.files
+    end
+    for _, chapter in ipairs(chapters or {}) do
+        if type(chapter.files) ~= "table" or not chapter.files[1] then
+            chapter.files = files_by_uid[tostring(chapter.chapterUid)]
+        end
+    end
+    return chapters
+end
+
+function Content.fetch_chapters_epub_eink(client, settings, book, chapters, options)
+    options = options or {}
+    if not client.can_eink_download or not client:can_eink_download() then
+        error("eink download is not available")
+    end
+    chapters = ensure_eink_chapter_files(client, book, chapters)
+    local uids = {}
+    for _, chapter in ipairs(chapters or {}) do
+        uids[#uids + 1] = chapter.chapterUid
+    end
+    local param = Eink.build_chapters_param(uids)
+    if param == "" then
+        error("No readable chapter found")
+    end
+    logger.info("eink zip download", "bookId=", tostring(book.book_id or book.bookId), "chapters=", param)
+    local files = client:eink_download_zip(book.book_id or book.bookId, param)
+    local bodies, assets = Eink.files_to_chapter_bodies(files, chapters)
+    local css
+    local selected = {}
+    for chapter_index, chapter in ipairs(chapters or {}) do
+        local uid = tostring(chapter.chapterUid or chapter_index)
+        local xhtml = bodies[uid]
+        if type(xhtml) == "string" and xhtml ~= "" then
+            if options.progress then
+                options.progress(chapter_index, #chapters, chapter, "text")
+            end
+            xhtml, css = apply_chapter_annotations(client, settings, book, chapter, xhtml, css)
+            bodies[uid] = xhtml
+            selected[#selected + 1] = chapter
+        end
+    end
+    if #selected == 0 then
+        error("eink ZIP contained no matching chapters")
+    end
+    local path = Content.save_book_epub(settings, book, selected, bodies, options.suffix or "book", assets, css)
+    book.cached_chapters = book.cached_chapters or {}
+    for chapter_index, chapter in ipairs(selected) do
+        book.cached_chapters[tostring(chapter.chapterUid or chapter_index)] = path
+    end
+    book.cached_file = path
+    book.reader_url = book.reader_url or WeRead.reader_url(book.book_id or book.bookId)
+    return path, selected
+end
+
 function Content.fetch_chapters_epub(client, settings, book, chapters, options)
     options = options or {}
+    if client.can_eink_download and client:can_eink_download() then
+        local ok, path, selected = pcall(Content.fetch_chapters_epub_eink, client, settings, book, chapters, options)
+        if ok then
+            return path, selected
+        end
+        logger.warn("eink zip download failed, falling back to web chapters:", tostring(path))
+    end
     local selected = {}
     local bodies = {}
     local assets = {}

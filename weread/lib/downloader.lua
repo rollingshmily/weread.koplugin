@@ -18,6 +18,7 @@ local time = require("ui/time")
 local T = require("ffi/util").template
 
 local Content = require("weread.lib.content")
+local Eink = require("weread.lib.eink")
 local DownloadDialog = require("weread.ui.download_dialog")
 local Footnotes = require("weread.lib.footnotes")
 local I18n = require("weread.lib.i18n")
@@ -235,6 +236,96 @@ function Downloader:_dispatchLaunch(dl, index, attempt)
     }
 end
 
+function Downloader:_loadEinkBulk(dl)
+    if dl.eink_tried then
+        return
+    end
+    dl.eink_tried = true
+    if not self.client.can_eink_download or not self.client:can_eink_download() then
+        return
+    end
+    local bulk_ok, files = pcall(function()
+        local uids = {}
+        for _, item in ipairs(dl.chapters or {}) do
+            uids[#uids + 1] = item.chapterUid
+        end
+        return self.client:eink_download_zip(
+            dl.book.book_id or dl.book.bookId,
+            Eink.build_chapters_param(uids)
+        )
+    end)
+    if not bulk_ok or type(files) ~= "table" then
+        logger.warn("eink zip download failed, falling back to web chapters:",
+            log_error(files))
+        return
+    end
+    local info_ok, info = pcall(self.client.eink_chapterinfo, self.client,
+        dl.book.book_id or dl.book.bookId)
+    if info_ok and type(info) == "table" then
+        local files_by_uid = {}
+        for _, item in ipairs(info.chapters or {}) do
+            files_by_uid[tostring(item.chapterUid)] = item.files
+        end
+        for _, item in ipairs(dl.chapters or {}) do
+            if type(item.files) ~= "table" or not item.files[1] then
+                item.files = files_by_uid[tostring(item.chapterUid)]
+            end
+        end
+    end
+    dl.eink_files = files
+    dl.eink_bodies, dl.eink_assets = Eink.files_to_chapter_bodies(files, dl.chapters)
+    logger.info("eink zip download ready")
+end
+
+function Downloader:_tryEinkBulkCheckpoint(dl)
+    self:_loadEinkBulk(dl)
+    if type(dl.eink_bodies) ~= "table" then
+        return
+    end
+    local book_id = dl.book and (dl.book.book_id or dl.book.bookId)
+    local filled = 0
+    for index, chapter in ipairs(dl.chapters or {}) do
+        if not dl.dispatch_done[index] then
+            local uid = tostring(chapter.chapterUid or index)
+            local body = dl.eink_bodies[uid]
+            if type(body) == "string" and body ~= "" then
+                local xhtml = body
+                if book_id and chapter.chapterUid then
+                    local ok_th, processed = pcall(
+                        Thoughts.apply, self.client, self.settings,
+                        book_id, chapter.chapterUid, xhtml)
+                    if ok_th and type(processed) == "string" and processed ~= "" then
+                        xhtml = processed
+                    end
+                end
+                local chapter_assets = {}
+                if type(dl.eink_assets) == "table" and not dl.eink_assets_applied then
+                    chapter_assets = dl.eink_assets
+                    dl.eink_assets_applied = true
+                end
+                local source_path = Checkpoint.chapter_path(dl.workspace.path, uid)
+                local ok_write, err = Checkpoint.write_chapter(source_path, xhtml)
+                if ok_write then
+                    self:_dispatchAccept(dl, index, chapter, {
+                        source_path = source_path,
+                        assets = chapter_assets,
+                    })
+                    filled = filled + 1
+                else
+                    logger.warn("eink checkpoint write failed:",
+                        uid, log_error(err))
+                end
+            end
+        end
+    end
+    if filled > 0 then
+        logger.info("eink zip checkpointed chapters:", tostring(filled))
+        if dl.progress_dialog then
+            dl.progress_dialog:reportProgress(dl.dispatch_done_count)
+        end
+    end
+end
+
 function Downloader:_dispatchStep(dl)
     if not ffiutil or not ffiutil.runInSubProcess then
         dl.chapter_dispatch_enabled = false
@@ -255,6 +346,7 @@ function Downloader:_dispatchStep(dl)
                 dl.dispatch_done_count = dl.dispatch_done_count + 1
             end
         end
+        self:_tryEinkBulkCheckpoint(dl)
     end
 
     for index, job in pairs(dl.dispatch_active) do
@@ -861,14 +953,19 @@ function Downloader:start(book, chapters, suffix, options)
         end
         return false
     end
-    if options.prefetch and self.settings.is_cookie_configured
-        and not self.settings:is_cookie_configured() then
+    local function has_download_auth()
+        if self.settings.has_download_auth then
+            return self.settings:has_download_auth()
+        end
+        return self.settings.is_cookie_configured and self.settings:is_cookie_configured()
+    end
+    if options.prefetch and not has_download_auth() then
         if type(options.on_complete) == "function" then
             pcall(options.on_complete, false, "authentication_required")
         end
         return false
     end
-    if not options.prefetch and not self.require_login(true, false) then
+    if not options.prefetch and not has_download_auth() and not self.require_login(true, false) then
         if type(options.on_complete) == "function" then
             pcall(options.on_complete, false, "authentication_required")
         end
@@ -1719,20 +1816,40 @@ function Downloader:_step(dl)
             chapter.title or tostring(chapter.chapterUid)),
         dl.index - 1)
     local started = time.now()
-    local ok, xhtml = pcall(function()
-        return Content.fetch_single_chapter_source(
-            self.client, self.settings, dl.book, chapter, dl.state
-        )
-    end)
+    self:_loadEinkBulk(dl)
+    local ok, xhtml
+    local uid = tostring(chapter.chapterUid or dl.index)
+    if dl.eink_bodies and type(dl.eink_bodies[uid]) == "string" and dl.eink_bodies[uid] ~= "" then
+        ok, xhtml = pcall(function()
+            local body = dl.eink_bodies[uid]
+            if type(dl.eink_assets) == "table" then
+                dl.assets = dl.assets or {}
+                dl.assets_by_uid = dl.assets_by_uid or {}
+                if not dl.eink_assets_applied then
+                    dl.eink_assets_applied = true
+                    dl.assets_by_uid[uid] = dl.eink_assets
+                    for _, asset in ipairs(dl.eink_assets) do
+                        dl.assets[#dl.assets + 1] = asset
+                    end
+                end
+            end
+            return body
+        end)
+    else
+        ok, xhtml = pcall(function()
+            return Content.fetch_single_chapter_source(
+                self.client, self.settings, dl.book, chapter, dl.state
+            )
+        end)
+    end
     self:_perf(dl, "chapter_source", started, "ok=", tostring(ok))
     if not ok then
         self:_retryChapterSource(dl, xhtml)
         return
     end
     if dl.chapter_source_retries then
-        dl.chapter_source_retries[tostring(chapter.chapterUid or dl.index)] = nil
+        dl.chapter_source_retries[uid] = nil
     end
-    local uid = tostring(chapter.chapterUid or dl.index)
     local scan_ok, scan = pcall(Footnotes.scan_chapter, xhtml, chapter)
     dl.footnote_scans = dl.footnote_scans or {}
     if scan_ok then
