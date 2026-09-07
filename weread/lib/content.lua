@@ -412,11 +412,11 @@ local function remove_tree(path)
         or not path:match("/%.weread%-download%-%d+%-%d+$") then
         return nil, "refusing to remove an invalid download workspace"
     end
-    local ok, ffiutil = pcall(require, "ffi/util")
-    if not ok or not ffiutil or not ffiutil.purgeDir then
+    local ok, purge_util = pcall(require, "ffi/util")
+    if not ok or not purge_util or not purge_util.purgeDir then
         return nil, "directory cleanup unavailable"
     end
-    local called, removed, err = pcall(ffiutil.purgeDir, path)
+    local called, removed, err = pcall(purge_util.purgeDir, path)
     if not called then return nil, removed end
     if removed == false then return nil, err end
     return true
@@ -972,9 +972,9 @@ function Content.save_book_epub_from_files(settings, book, chapters, body_files,
     make_path(text_dir)
 
     local function cleanup()
-        local ok, ffiutil = pcall(require, "ffi/util")
-        if ok and ffiutil and ffiutil.purgeDir then
-            pcall(ffiutil.purgeDir, root)
+        local ok, purge_util = pcall(require, "ffi/util")
+        if ok and purge_util and purge_util.purgeDir then
+            pcall(purge_util.purgeDir, root)
         else
             os.execute("rm -rf " .. string.format("%q", root))
         end
@@ -1285,7 +1285,7 @@ function Content.download_remote_images(client, xhtml, used_names, progress)
         end
         local seed = basename((url:match("^[^%?#]+") or url))
         local fname = unique_asset_name(used_names, seed ~= "" and seed or ("img" .. tostring(index)), ext)
-        local href = image_href(workspace, fname)
+        local href = image_href(nil, fname)
         remote_image_hrefs[url] = href
         table.insert(assets, {
             href = href,
@@ -1318,7 +1318,7 @@ function Content.download_chapter_assets(client, book, chapter, used_names)
         if media_type:match("^image/") then
             local stem = basename(entry.name)
             local filename = unique_asset_name(used_names, stem, ext)
-            local href = image_href(workspace, filename)
+            local href = image_href(nil, filename)
             local epub_relative = "../" .. href
             table.insert(assets, {
                 href = href,
@@ -2474,7 +2474,7 @@ function Content.download_mp_images(client, body_html, progress, embed_base64)
             return "src=" .. quote .. "data:" .. mt .. ";base64," .. b64 .. quote
         end
         local fname = unique_asset_name(used_names, "img" .. tostring(index), ext)
-        local href = image_href(workspace, fname)
+        local href = image_href(nil, fname)
         table.insert(assets, {
             href = href,
             media_type = mt,

@@ -48,7 +48,7 @@ package.preload["weread.lib.footnotes"] = function()
     return {
         scan_chapter = function() error("no footnotes in fixture") end,
         build_book_index = function() return {} end,
-        transform_chapter = function(_html) return _html, {} end,
+        transform_chapter = function(html) return html, {} end,
         validate = function() return true end,
         has_converted = function() return false end,
         FOOTNOTES_CSS = "",

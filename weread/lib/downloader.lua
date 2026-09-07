@@ -28,8 +28,6 @@ local WorkerSettings = require("weread.lib.worker_settings")
 local Checkpoint = require("weread.lib.download_checkpoint")
 local ok_ffiutil, ffiutil = pcall(require, "ffi/util")
 if not ok_ffiutil then ffiutil = nil end
-local ok_socket, socket = pcall(require, "socket")
-if not ok_socket then socket = nil end
 
 local function _(text)
     return I18n.tr(text)
