@@ -196,7 +196,7 @@ function Downloader:_dispatchLaunch(dl, index, attempt)
             asset_prefix = "chapter-" .. tostring(index),
         },
         parallel_shards = false,
-        reader_state_ready = true,
+        reader_state_ready = false,
     }
     local pid, read_fd = ffiutil.runInSubProcess(function(_pid, write_fd)
         local status
@@ -274,12 +274,13 @@ function Downloader:_dispatchStep(dl)
                 if attempts < 3 then
                     dl.dispatch_retry_at[index] = os.clock() + attempts
                 else
-                    dl.failed[#dl.failed + 1] = tostring(job.chapter.chapterUid or index)
-                    dl.dispatch_done[index] = true
-                    dl.dispatch_done_count = dl.dispatch_done_count + 1
-                    logger.warn("chapter worker failed:",
-                        tostring(job.chapter.chapterUid or index),
+                    local chapter_uid = tostring(job.chapter.chapterUid or index)
+                    dl.failed[#dl.failed + 1] = chapter_uid
+                    logger.warn("chapter worker failed:", chapter_uid,
                         ok and status and status.error or raw)
+                    self:_abortFullBookDownload(dl, index, chapter_uid,
+                        ok and status and status.error or raw)
+                    return
                 end
             end
         end
@@ -414,6 +415,31 @@ function Downloader:_stopDispatch(dl)
     end
     dl.dispatch_active = {}
     dl.epub_build = nil
+end
+
+function Downloader:_abortFullBookDownload(dl, index, chapter_uid, reason)
+    self:_stopDispatch(dl)
+    dl.chapter_dispatch_enabled = false
+    if dl.progress_dialog then
+        dl.progress_dialog:close()
+        dl.progress_dialog = nil
+    end
+    self:_releaseStandby(dl)
+    logger.warn(
+        "full-book download stopped after chapter failure:",
+        "index=", tostring(index) .. "/" .. tostring(dl.total),
+        "chapter_uid=", tostring(chapter_uid),
+        "reason=", log_error(reason)
+    )
+    -- Deliberately keep the workspace and checkpoint. Completed chapters can
+    -- be resumed by the next attempt; cancellation cleanup must not run here.
+    self:_notifyCompletion(dl, false, "chapter_failed")
+    self:_finishJob(dl)
+    if not dl.prefetch then
+        self.show_info(T(_(
+            "Full-book download stopped at chapter %1/%2.\n\nThe chapter failed after retries. Completed chapters were kept; retry to continue."
+        ), tostring(index), tostring(dl.total)))
+    end
 end
 
 function Downloader:recover()

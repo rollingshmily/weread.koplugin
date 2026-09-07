@@ -82,6 +82,8 @@ package.preload["weread.lib.content"] = function()
             return { path = path, incoming_dir = path .. "/incoming", asset_dir = path .. "/images" }
         end,
         fetch_single_chapter_source = function(_client, _settings, _book, chapter, state)
+            assert(state.reader_state_ready ~= true,
+                "chapter worker reused stale Reader state")
             state.css = "body{}"
             return "<p>chapter " .. tostring(chapter.chapterUid) .. "</p>"
         end,
@@ -135,30 +137,39 @@ end
 assert(runs == 4, "three chapter workers plus EPUB worker were not dispatched, runs=" .. tostring(runs))
 assert(downloader._active_job == nil, "chapter dispatch did not finish")
 
--- A worker that exits without writing a result must be removed and retried;
--- otherwise the UI stays at 0 forever.
+-- A worker that exhausts its retries must stop the whole full-book job
+-- immediately, instead of walking every remaining chapter.
 suppress_output = true
 scheduled = {}
 jobs = {}
 payloads = {}
 payload_seq = 0
+local info_messages = {}
 local stalled = Downloader:new{
     client = fake_client, settings = settings,
     require_login = function() return true end,
     run_online_task = function(_label, callback) callback() return true end,
-    show_info = function() end, show_transient = function() end,
+    show_info = function(text) info_messages[#info_messages + 1] = text end,
+    show_transient = function() end,
     refresh_ui = function() end, refresh_shelf = function() end,
     open_file = function() end, safe_callback = function(_label, callback) return callback end,
 }
 assert(stalled:start({ book_id = "book-2", title = "No result" }, {
     { chapterUid = 1, title = "1" },
-}, "full", { offer_read = false }), "no-result download did not start")
+    { chapterUid = 2, title = "2" },
+}, "full", { offer_read = false, chapter_concurrency = 1 }), "no-result download did not start")
 local initialize = table.remove(scheduled, 1)
 initialize()
 local dispatch = table.remove(scheduled, 1)
+local runs_before_failure = runs
+stalled._active_job.dispatch_attempts[1] = 2
 dispatch()
-assert(next(stalled._active_job.dispatch_active) == nil,
-    "completed worker without pipe output remained active")
+assert(stalled._active_job == nil,
+    "terminal chapter failure did not stop the full-book job")
+assert(runs == runs_before_failure,
+    "remaining chapters were launched after terminal failure")
+assert(#info_messages == 1 and tostring(info_messages[1]):find("stopped", 1, true),
+    "terminal chapter failure did not show an immediate stop message")
 
 os.execute("rm -rf " .. string.format("%q", root))
 print("downloader_dispatch_spec: passed")

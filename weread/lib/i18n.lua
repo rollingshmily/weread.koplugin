@@ -198,6 +198,7 @@ local zh = {
     ["Next chapter prefetch failed: %1"] = "下一章预下载失败：%1",
     ["Network is not connected"] = "网络未连接",
     ["No chapters were downloaded."] = "没有成功下载任何章节。",
+    ["Full-book download stopped at chapter %1/%2.\n\nThe chapter failed after retries. Completed chapters were kept; retry to continue."] = "整本下载已在第 %1/%2 章停止。\n\n该章重试后仍失败，已完成章节已保留；重试即可继续。",
     ["Full-book download stopped: %1 of %2 chapters failed.\n\nNo incomplete EPUB was saved. Please retry the download."] = "整本下载已停止：共 %2 章，其中 %1 章失败。\n\n未保存残缺的 EPUB，请重试下载。",
     ["No readable chapter found"] = "没有可阅读的章节。",
     ["Read now"] = "立即阅读",
