@@ -259,9 +259,10 @@ function Downloader:_dispatchStep(dl)
 
     for index, job in pairs(dl.dispatch_active) do
         local done = ffiutil.isSubProcessDone(job.pid)
-        local readable = not ffiutil.getNonBlockingReadSize
-            or ffiutil.getNonBlockingReadSize(job.read_fd) > 0
-        if done and readable then
+        if done then
+            -- Once the child exited, its write end is closed. Reading now is
+            -- safe even when it emitted no payload; treating that case as a
+            -- failed attempt prevents a permanently stuck active worker.
             local raw = ffiutil.readAllFromFD(job.read_fd) or ""
             local ok, status = pcall(self.client.json_decode, self.client, raw)
             dl.dispatch_active[index] = nil
@@ -286,6 +287,13 @@ function Downloader:_dispatchStep(dl)
 
     local active_count = 0
     for _index in pairs(dl.dispatch_active) do active_count = active_count + 1 end
+    local display_index = math.min(dl.dispatch_done_count + 1, #dl.chapters)
+    local display_chapter = dl.chapters[display_index] or {}
+    self:_setStage(dl,
+        T(_("Downloading chapter %1/%2: %3"),
+            tostring(display_index), tostring(#dl.chapters),
+            display_chapter.title or tostring(display_chapter.chapterUid or "")),
+        dl.dispatch_done_count)
     for index, chapter in ipairs(dl.chapters) do
         if active_count >= dl.chapter_concurrency then break end
         if not dl.dispatch_done[index] and not dl.dispatch_active[index]

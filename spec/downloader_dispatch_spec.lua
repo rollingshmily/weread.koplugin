@@ -4,6 +4,7 @@ local scheduled = {}
 local jobs = {}
 local payloads = {}
 local payload_seq = 0
+local suppress_output = false
 local runs = 0
 local root = os.tmpname()
 os.remove(root)
@@ -35,7 +36,11 @@ package.preload["ffi/util"] = function()
             callback(runs, runs)
             return runs, runs
         end,
-        writeToFD = function(fd, data) jobs[fd].data = data return true end,
+        writeToFD = function(fd, data)
+            if suppress_output then return true end
+            jobs[fd].data = data
+            return true
+        end,
         isSubProcessDone = function() return true end,
         getNonBlockingReadSize = function(fd) return #(jobs[fd].data or "") end,
         readAllFromFD = function(fd) return jobs[fd].data end,
@@ -129,6 +134,31 @@ while #scheduled > 0 do
 end
 assert(runs == 4, "three chapter workers plus EPUB worker were not dispatched, runs=" .. tostring(runs))
 assert(downloader._active_job == nil, "chapter dispatch did not finish")
+
+-- A worker that exits without writing a result must be removed and retried;
+-- otherwise the UI stays at 0 forever.
+suppress_output = true
+scheduled = {}
+jobs = {}
+payloads = {}
+payload_seq = 0
+local stalled = Downloader:new{
+    client = fake_client, settings = settings,
+    require_login = function() return true end,
+    run_online_task = function(_label, callback) callback() return true end,
+    show_info = function() end, show_transient = function() end,
+    refresh_ui = function() end, refresh_shelf = function() end,
+    open_file = function() end, safe_callback = function(_label, callback) return callback end,
+}
+assert(stalled:start({ book_id = "book-2", title = "No result" }, {
+    { chapterUid = 1, title = "1" },
+}, "full", { offer_read = false }), "no-result download did not start")
+local initialize = table.remove(scheduled, 1)
+initialize()
+local dispatch = table.remove(scheduled, 1)
+dispatch()
+assert(next(stalled._active_job.dispatch_active) == nil,
+    "completed worker without pipe output remained active")
 
 os.execute("rm -rf " .. string.format("%q", root))
 print("downloader_dispatch_spec: passed")
