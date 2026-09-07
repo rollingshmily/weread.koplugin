@@ -83,6 +83,7 @@ function DownloadDialog:init()
             show_parent = self,
         }
         table.insert(vertical_group, VerticalSpan:new{ width = Size.padding.large })
+        self.button_table = button_table
         table.insert(vertical_group, button_table)
     end
 
@@ -118,6 +119,14 @@ function DownloadDialog:setTitle(title)
         UIManager:setDirty(self, function() return "fast", self.dimen end)
         UIManager:forceRePaint()
     end
+end
+
+function DownloadDialog:setButtonText(id, text)
+    if not self.button_table or not self.button_table.getButtonById then return end
+    local button = self.button_table:getButtonById(id)
+    if not button then return end
+    button:setText(text, button.width)
+    button:refresh()
 end
 
 function DownloadDialog:show()

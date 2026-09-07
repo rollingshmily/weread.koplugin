@@ -417,6 +417,49 @@ function Downloader:_stopDispatch(dl)
     dl.epub_build = nil
 end
 
+function Downloader:_setPauseButton(dl, text)
+    if dl and dl.progress_dialog and dl.progress_dialog.setButtonText then
+        dl.progress_dialog:setButtonText("pause_download", text)
+    end
+end
+
+function Downloader:_pauseDownload(dl)
+    if not dl or dl.paused or dl.cancelled then return end
+    dl.paused = true
+    dl.paused_stage_title = dl.stage_title
+    dl.paused_stage_progress = dl.stage_progress
+    for index in pairs(dl.dispatch_active or {}) do
+        dl.dispatch_attempts[index] = math.max(0,
+            (dl.dispatch_attempts[index] or 1) - 1)
+        dl.dispatch_retry_at[index] = nil
+    end
+    self:_stopDispatch(dl)
+    self:_releaseStandby(dl)
+    self:_setStage(dl, _("Download paused"),
+        dl.stage_progress or math.max(0, dl.index - 1))
+    self:_setPauseButton(dl, _("Continue download"))
+    logger.info("download paused:",
+        "chapter=", tostring(math.max(0, (dl.index or 1) - 1))
+            .. "/" .. tostring(dl.total))
+end
+
+function Downloader:_resumeDownload(dl)
+    if not dl or not dl.paused or dl.cancelled then return end
+    dl.paused = false
+    self:_beginStandby()
+    dl.standby_guard = true
+    self:_setPauseButton(dl, _("Pause download"))
+    if dl.paused_stage_title then
+        self:_setStage(dl, dl.paused_stage_title, dl.paused_stage_progress)
+    end
+    dl.paused_stage_title = nil
+    dl.paused_stage_progress = nil
+    logger.info("download resumed:",
+        "chapter=", tostring(math.max(0, (dl.index or 1) - 1))
+            .. "/" .. tostring(dl.total))
+    self:_scheduleGuarded(dl, function() self:_step(dl) end)
+end
+
 function Downloader:_abortFullBookDownload(dl, index, chapter_uid, reason)
     self:_stopDispatch(dl)
     dl.chapter_dispatch_enabled = false
@@ -618,23 +661,42 @@ function Downloader:_ensureProgressDialog(dl)
     local progress_dialog = DownloadDialog:new{
         title = dl.stage_title or T(_("Downloading: %1"), dl.book.title or ""),
         progress_max = dl.total,
-        buttons = {{
+        buttons = {
             {
-                text = _("Cancel download"),
-                callback = function()
-                    if dl.prefetch then
-                        self:cancelPrefetch("cancelled")
-                    else
-                        dl.cancelled = true
-                        dl.cancel_reason = dl.cancel_reason or "cancelled"
-                    end
-                    if dl.progress_dialog then
-                        dl.progress_dialog:close()
-                        dl.progress_dialog = nil
-                    end
-                end,
+                {
+                    id = "pause_download",
+                    text = _("Pause download"),
+                    callback = function()
+                        if dl.paused then
+                            self:_resumeDownload(dl)
+                        else
+                            self:_pauseDownload(dl)
+                        end
+                    end,
+                },
             },
-        }},
+            {
+                {
+                    text = _("Cancel download"),
+                    callback = function()
+                        if dl.prefetch then
+                            self:cancelPrefetch("cancelled")
+                        else
+                            dl.cancelled = true
+                            dl.cancel_reason = dl.cancel_reason or "cancelled"
+                            if dl.paused then
+                                dl.paused = false
+                                self:_scheduleGuarded(dl, function() self:_step(dl) end)
+                            end
+                        end
+                        if dl.progress_dialog then
+                            dl.progress_dialog:close()
+                            dl.progress_dialog = nil
+                        end
+                    end,
+                },
+            },
+        },
     }
     dl.progress_dialog = progress_dialog
     progress_dialog:show()
@@ -1395,6 +1457,10 @@ function Downloader:_step(dl)
         if not dl.prefetch then
             self.show_transient(_("Download cancelled"), 2)
         end
+        return
+    end
+
+    if dl.paused then
         return
     end
 

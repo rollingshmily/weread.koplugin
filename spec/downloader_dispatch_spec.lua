@@ -67,9 +67,13 @@ package.preload["weread.lib.footnotes"] = function()
 end
 package.preload["weread.lib.thoughts"] = function() return {} end
 package.preload["weread.ui.download_dialog"] = function()
-    return { new = function(_self, options)
+    return { new = function(_dialog, options)
         options.show = function() end; options.close = function() end
         options.setTitle = function() end; options.reportProgress = function() end
+        options.setButtonText = function(_button_dialog, id, text)
+            options.button_texts = options.button_texts or {}
+            options.button_texts[id] = text
+        end
         return options
     end }
 end
@@ -170,6 +174,44 @@ assert(runs == runs_before_failure,
     "remaining chapters were launched after terminal failure")
 assert(#info_messages == 1 and tostring(info_messages[1]):find("stopped", 1, true),
     "terminal chapter failure did not show an immediate stop message")
+
+-- Pausing stops active workers without cancelling the checkpoint; continuing
+-- reuses the same job and schedules the next dispatch poll.
+suppress_output = false
+scheduled = {}
+jobs = {}
+payloads = {}
+payload_seq = 0
+local pausable = Downloader:new{
+    client = fake_client, settings = settings,
+    require_login = function() return true end,
+    run_online_task = function(_label, callback) callback() return true end,
+    show_info = function() end, show_transient = function() end,
+    refresh_ui = function() end, refresh_shelf = function() end,
+    open_file = function() end, safe_callback = function(_label, callback) return callback end,
+}
+assert(pausable:start({ book_id = "book-3", title = "Pausable" }, {
+    { chapterUid = 1, title = "1" },
+    { chapterUid = 2, title = "2" },
+}, "full", { offer_read = false, chapter_concurrency = 1 }),
+    "pausable download did not start")
+local launch = table.remove(scheduled, 1)
+launch()
+local pause_dialog = pausable._active_job.progress_dialog
+local pause_button = pause_dialog.buttons[1][1]
+pause_button.callback()
+assert(pausable._active_job.paused == true,
+    "pause button did not pause the download")
+assert(next(pausable._active_job.dispatch_active) == nil,
+    "pause button left a chapter worker active")
+assert(pause_dialog.button_texts.pause_download == "Continue download",
+    "pause button did not change to continue")
+pause_button.callback()
+assert(pausable._active_job.paused == false,
+    "continue button did not resume the download")
+assert(pause_dialog.button_texts.pause_download == "Pause download",
+    "continue button did not change back to pause")
+assert(#scheduled > 0, "continue button did not schedule download work")
 
 os.execute("rm -rf " .. string.format("%q", root))
 print("downloader_dispatch_spec: passed")
