@@ -401,7 +401,11 @@ function Settings:update_auth(credentials, options)
         changed = true
     end
     if type(credentials.account) == "table" then
-        self:set("account", deepcopy(credentials.account))
+        local account = deepcopy(self:get("account", deepcopy(defaults.account)))
+        for key, value in pairs(credentials.account) do
+            account[key] = deepcopy(value)
+        end
+        self:set("account", account)
         changed = true
     end
 

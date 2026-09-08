@@ -875,9 +875,8 @@ local Eink = require("weread.lib.eink")
 
 function Client:eink_credentials()
     local eink = self.settings:get("eink", {}) or {}
-    local cookies = self.settings:get("cookies", {}) or {}
-    local vid = tostring(eink.vid or cookies.wr_vid or "")
-    local token = tostring(eink.access_token or cookies.wr_skey or "")
+    local vid = tostring(eink.vid or "")
+    local token = tostring(eink['access_token'] or "")
     if vid == "" or token == "" then
         return nil
     end

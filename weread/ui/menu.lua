@@ -68,8 +68,8 @@ function M:getMainMenuItems()
     local items = {
         {
             text_func = function()
-                local account = self.settings:get("account", {})
-                if account.login_method == "qr" and tonumber(account.login_time or 0) > 0 then
+                if self.settings:is_cookie_configured() then
+                    local account = self.settings:get("account", {})
                     local name = type(account.name) == "string" and account.name or ""
                     if name == "" then name = _("Unknown account") end
                     return T(_("Logged in · %1"), name)
@@ -79,8 +79,7 @@ function M:getMainMenuItems()
             keep_menu_open = true,
             callback = self:safeCallback(_("QR login"), function(touchmenu_instance)
                 self._login_menu_instance = touchmenu_instance
-                local account = self.settings:get("account", {})
-                if account.login_method == "qr" and tonumber(account.login_time or 0) > 0 then
+                if self.settings:is_cookie_configured() then
                     self:showAccountStatus()
                 else
                     self.qr_login:start()
@@ -91,11 +90,9 @@ function M:getMainMenuItems()
             text_func = function()
                 if self.settings:is_eink_configured() then
                     local eink = self.settings:get("eink", {}) or {}
-                    local account = self.settings:get("account", {}) or {}
-                    local label = tostring(eink.vid or "")
-                    if type(account.name) == "string" and account.name ~= ""
-                        and account.login_method == "eink_qr" then
-                        label = account.name
+                    local label = tostring(eink.name or "")
+                    if label == "" then
+                        label = tostring(eink.vid or "")
                     end
                     return T(_("Eink logged in · %1"), label)
                 end

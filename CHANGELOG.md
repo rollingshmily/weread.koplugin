@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.23]
+
+### 登录态隔离
+
+- 墨水屏扫码只写 `settings.eink`，不再整表覆盖 `account`，Web Cookie / `login_method` 不会被挤掉。
+- Web 扫码只更新 cookie 和 account，不碰 eink 凭证。
+- `account` 改为字段合并，不再整份替换。
+- ZIP 下载只使用墨水屏 `vid` + `accessToken`，不再拿 `wr_skey` 冒充。
+- 主菜单 Web「已登录」看 cookie 是否存在，不看被墨水屏改过的 `login_method`。
+
+
 ## [1.2.22]
 
 ### 墨水屏 ZIP 分批下载

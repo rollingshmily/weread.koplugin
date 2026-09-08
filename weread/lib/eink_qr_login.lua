@@ -214,19 +214,7 @@ function EinkQRLogin:_exchange(wx_code, device_id)
 end
 
 function EinkQRLogin:_save(creds)
-    local account = self.settings:get("account", {}) or {}
-    local account_update = {
-        user_vid = creds.vid,
-        login_time = os.time(),
-    }
-    if type(creds.name) == "string" and creds.name ~= "" then
-        account_update.name = creds.name
-    elseif type(account.name) ~= "string" or account.name == "" then
-        account_update.name = creds.vid
-    end
-    if account.login_method ~= "qr" then
-        account_update.login_method = "eink_qr"
-    end
+    -- Keep eink credentials out of the web cookie/account records.
     self.settings:update_auth({
         eink = {
             vid = creds.vid,
@@ -234,8 +222,9 @@ function EinkQRLogin:_save(creds)
             refresh_token = creds.refresh_token,
             device_id = creds.device_id,
             skey = creds.skey,
+            name = creds.name or "",
+            login_time = tostring(os.time()),
         },
-        account = account_update,
     }, { replace_cookies = false })
 end
 
