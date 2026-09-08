@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.22]
+
+### 墨水屏 ZIP 分批下载
+
+- `chapterdownload` 按每批 80 章拉取，避免 2000+ 章一次请求返回 JSON 而不是 ZIP。
+- ZIP 失败时日志带上 HTTP 状态和 errcode/errmsg，不再只写 “did not return a ZIP”。
+- 部分批次成功时保留已解开章节，剩余章节再走 web worker。
+
+
 ## [1.2.21]
 
 ### 墨水屏登录状态

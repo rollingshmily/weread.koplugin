@@ -888,7 +888,27 @@ function Client:can_eink_download()
     return self:eink_credentials() ~= nil
 end
 
-function Client:eink_request(path, params)
+local function eink_body_preview(body)
+    if type(body) == "table" then
+        local errcode = body.errcode or body.errCode or body.code
+        local errmsg = body.errmsg or body.errMsg or body.errlog
+        local bits = {}
+        if errcode ~= nil then bits[#bits + 1] = "errcode=" .. tostring(errcode) end
+        if errmsg ~= nil then bits[#bits + 1] = "errmsg=" .. tostring(errmsg) end
+        if #bits > 0 then
+            return table.concat(bits, " ")
+        end
+        return "json-object"
+    end
+    if type(body) ~= "string" or body == "" then
+        return tostring(body)
+    end
+    local prefix = body:sub(1, 180):gsub("[%c]+", " ")
+    return prefix
+end
+
+function Client:eink_request(path, params, extra)
+    extra = extra or {}
     local vid, token = self:eink_credentials()
     if not vid then
         error("eink credentials are missing")
@@ -907,7 +927,7 @@ function Client:eink_request(path, params)
         method = "GET",
         skip_cookie = true,
         persist_response_cookies = false,
-        timeout = { 30, 180 },
+        timeout = extra.timeout or { 30, 180 },
         headers = {
             ["User-Agent"] = Eink.USER_AGENT,
             ["Accept"] = "*/*",
@@ -960,12 +980,21 @@ function Client:eink_download_zip(book_id, chapters_param)
     local body, code, headers = self:eink_request("/book/chapterdownload", {
         bookId = tostring(book_id),
         chapters = tostring(chapters_param),
-    })
+    }, { timeout = { 20, 90 } })
     if not code or code < 200 or code >= 300 then
-        error("eink chapterdownload failed: HTTP " .. tostring(code or "unknown"))
+        error("eink chapterdownload failed: HTTP " .. tostring(code or "unknown")
+            .. " " .. eink_body_preview(body))
+    end
+    if type(body) == "string" and body:sub(1, 1) == "{" then
+        local ok_errjson, parsed = pcall(self.json_decode, self, body)
+        if ok_errjson then
+            error("eink chapterdownload did not return a ZIP: HTTP "
+                .. tostring(code) .. " " .. eink_body_preview(parsed))
+        end
     end
     if type(body) ~= "string" or body:sub(1, 2) ~= "PK" then
-        error("eink chapterdownload did not return a ZIP")
+        error("eink chapterdownload did not return a ZIP: HTTP "
+            .. tostring(code) .. " " .. eink_body_preview(body))
     end
     local encrypt_key = header_value(headers, "encryptKey") or header_value(headers, "encryptkey")
     if not encrypt_key or encrypt_key == "" then

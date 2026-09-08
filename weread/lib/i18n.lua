@@ -116,6 +116,7 @@ local zh = {
     ["Clear account data"] = "清除账号数据",
     ["QR login"] = "扫码登录",
     ["Eink QR login"] = "墨水屏扫码登录",
+    ["Downloading eink ZIP %1/%2"] = "正在下载墨水屏 ZIP %1/%2",
     ["Eink QR login (replace)"] = "重新扫码墨水屏登录",
     ["Eink logged in · %1"] = "墨水屏已登录 · %1",
     ["Eink account"] = "墨水屏账号",
