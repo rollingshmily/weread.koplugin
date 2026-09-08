@@ -1771,10 +1771,7 @@ function M:searchWithUI(keyword)
     end
     self:runOnlineTask(_("Search"), function()
         local ok, result = pcall(function()
-            return self.client:gateway("/store/search", {
-                keyword = keyword,
-                count = 10,
-            })
+            return self.client:search_store(keyword, 10)
         end)
         if not ok then
             logger.err("search failed:", log_error(result))

@@ -446,24 +446,14 @@ function ProgressSync:_fetch_remote(book_id, chapters)
     local web
     local gateway_error
     local web_error
-    if self.settings:is_api_configured() then
-        local ok, result = pcall(self.client.get_progress, self.client, book_id)
-        if ok then
-            gateway, gateway_error = PositionMapper.normalize_remote(
-                result, book_id, "gateway", chapters)
-        else
-            gateway_error = tostring(result)
-        end
-    end
-    if self.settings:is_cookie_configured() then
-        local ok, result = pcall(
-            self.client.get_web_progress, self.client, book_id)
-        if ok then
-            web, web_error = PositionMapper.normalize_remote(
-                result, book_id, "web", chapters)
-        else
-            web_error = tostring(result)
-        end
+    local ok, result = pcall(self.client.get_progress, self.client, book_id)
+    if ok then
+        gateway, gateway_error = PositionMapper.normalize_remote(
+            result, book_id, "gateway", chapters)
+        web, web_error = gateway, gateway_error
+    else
+        gateway_error = tostring(result)
+        web_error = gateway_error
     end
     local selected = PositionMapper.choose_remote(
         web,

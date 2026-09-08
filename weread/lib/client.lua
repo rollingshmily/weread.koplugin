@@ -3,6 +3,7 @@ local logger = require("weread.lib.logger")
 local socketutil = require("socketutil")
 local http = require("socket.http")
 local Cookie = require("weread.lib.cookie")
+local Eink = require("weread.lib.eink")
 local WeRead = require("weread.lib.protocol")
 
 local ok_json, json = pcall(require, "json")
@@ -571,31 +572,25 @@ function Client:gateway(api_name, params)
     })
 end
 
+function Client:eink_json(path, params)
+    local body, code = self:eink_request(path, params)
+    if not code or code < 200 or code >= 300 then
+        error("eink " .. path .. " failed: HTTP " .. tostring(code or "unknown"))
+    end
+    return self:decode_http_json(body, {
+        method = "GET",
+        url = path,
+        code = code,
+    }), code
+end
+
 function Client:get_shelf()
-    logger.info(
-        "shelf sync request:",
-        "api=/shelf/sync",
-        "skill_version=", WeRead.SKILL_VERSION,
-        "auth=api_key",
-        "cookies=skipped",
-        "params=none"
-    )
-    local ok, result, code, headers = pcall(
-        self.gateway,
-        self,
-        "/shelf/sync",
-        {}
-    )
+    logger.info("shelf sync request:", "api=/shelf/sync", "auth=eink")
+    local ok, result, code = pcall(self.eink_json, self, "/shelf/sync", {})
     if not ok then
-        logger.err(
-            "shelf sync failed:",
-            "api=/shelf/sync",
-            "skill_version=", WeRead.SKILL_VERSION,
-            "error=", log_error(result)
-        )
+        logger.err("shelf sync failed:", "api=/shelf/sync", "error=", log_error(result))
         error(result, 0)
     end
-
     logger.info(
         "shelf sync completed:",
         "api=/shelf/sync",
@@ -606,7 +601,7 @@ function Client:get_shelf()
         "albums=", table_summary(type(result) == "table" and result.albums or nil),
         "mp=", table_summary(type(result) == "table" and result.mp or nil)
     )
-    return result, code, headers
+    return result, code
 end
 
 function Client:get_book_info(book_id)
@@ -622,22 +617,17 @@ function Client:get_book_reviews(book_id, review_list_type, count)
 end
 
 function Client:get_progress(book_id)
-    return self:gateway("/book/getprogress", { bookId = book_id })
+    return self:eink_json("/book/getProgress", { bookId = tostring(book_id) })
 end
 
 function Client:get_web_progress(book_id)
-    local url = "https://weread.qq.com/web/book/getProgress?bookId="
-        .. WeRead.urlencode(book_id)
-        .. "&_=" .. tostring(os.time() * 1000)
-    local text, code, headers = self:get_text(url, {
-        accept = "application/json, text/plain, */*",
-        referer = WeRead.reader_url(book_id),
-    })
-    return self:decode_http_json(text, {
-        method = "GET",
-        url = url,
-        code = code,
-        headers = headers,
+    return self:get_progress(book_id)
+end
+
+function Client:search_store(keyword, count)
+    return self:eink_json("/store/search", {
+        keyword = tostring(keyword or ""),
+        count = tonumber(count) or 10,
     })
 end
 
@@ -743,20 +733,33 @@ function Client:get_chapter_underlines(book_id, chapter_uid)
     if not chapter_uid then
         return false, nil, "empty chapter_uid"
     end
-
-    local ok, result = pcall(function()
-        return self:gateway("/book/underlines", {
-            bookId = tostring(book_id),
-            chapterUid = chapter_uid,
-        })
+    local rows, seen = {}, {}
+    local function add_items(items)
+        local data = Eink.underlines_for_chapter(items, chapter_uid)
+        for _, row in ipairs(data.underlines or {}) do
+            local key = tostring(row.range or "")
+            if key ~= "" and not seen[key] then
+                seen[key] = true
+                rows[#rows + 1] = row
+            end
+        end
+    end
+    local ok_list, list = pcall(function()
+        return self:eink_bookmarklist(book_id)
     end)
-    if not ok then
-        return false, nil, tostring(result)
+    if ok_list and type(list) == "table" then
+        add_items(list.updated)
     end
-    if type(result) ~= "table" then
-        return false, nil, "underlines: gateway returned non-table"
+    local ok_best, best = pcall(function()
+        return self:eink_json("/book/bestbookmarks", { bookId = tostring(book_id) })
+    end)
+    if ok_best and type(best) == "table" then
+        add_items(best.updated or best.bookmarks or best.items)
     end
-    return true, result
+    if not ok_list and not ok_best then
+        return false, nil, tostring(list or best or "eink underlines failed")
+    end
+    return true, { chapterUid = chapter_uid, underlines = rows }
 end
 
 function Client:build_chapter_review_batches(ranges)
@@ -870,8 +873,6 @@ function Client:get_review_comments(review_id, count, opts)
     end
     return true, parsed, nil
 end
-
-local Eink = require("weread.lib.eink")
 
 function Client:eink_credentials()
     local eink = self.settings:get("eink", {}) or {}

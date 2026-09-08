@@ -7,6 +7,8 @@
 - 登录只走墨水屏扫码，不再要微信 Cookie / 官方 API Key。
 - 下载只走 `chapterdownload`，失败不再回退 `e_0/e_1/e_3`。
 - 账号菜单去掉微信登录。
+- 书架 `/shelf/sync`、进度 `/book/getProgress`、搜索 `/store/search`、目录 `chapterinfo` 走 eink。
+- 划线走 `bookmarklist` + `bestbookmarks`，不再打 Skill gateway。
 
 
 ## [1.2.41]

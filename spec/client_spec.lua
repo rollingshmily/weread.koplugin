@@ -252,8 +252,8 @@ expect(decode_failure_log:find("response_body= <not-json>", 1, true),
     "JSON decode failure log omitted the raw response body")
 
 local shelf_client = Client:new(settings)
-shelf_client.gateway = function(_self, api_name, params)
-    expect(api_name == "/shelf/sync", "shelf helper used the wrong endpoint")
+shelf_client.eink_json = function(_self, path, params)
+    expect(path == "/shelf/sync", "shelf helper used the wrong endpoint")
     expect(type(params) == "table" and next(params) == nil,
         "shelf helper unexpectedly sent parameters")
     return {
@@ -261,15 +261,15 @@ shelf_client.gateway = function(_self, api_name, params)
         archive = {},
         albums = {},
         mp = {},
-    }, 200, {}
+    }, 200
 end
 local shelf = shelf_client:get_shelf()
 expect(#shelf.books == 1, "shelf helper did not return the response")
 local success_log = table.concat(logs, "\n")
 expect(success_log:find("api=/shelf/sync", 1, true),
     "shelf diagnostics omitted the endpoint")
-expect(success_log:find("skill_version= test-skill", 1, true),
-    "shelf diagnostics omitted the skill version")
+expect(success_log:find("auth=eink", 1, true),
+    "shelf diagnostics omitted eink auth")
 expect(success_log:find("books= table(1)", 1, true),
     "shelf diagnostics omitted the response shape")
 expect(not success_log:find("private-book-id", 1, true)
@@ -277,7 +277,7 @@ expect(not success_log:find("private-book-id", 1, true)
     "shelf diagnostics leaked response contents")
 
 logs = {}
-shelf_client.gateway = function()
+shelf_client.eink_json = function()
     error("HTTP 499, error_code=-202, error_message=-202")
 end
 ok, err = pcall(function()

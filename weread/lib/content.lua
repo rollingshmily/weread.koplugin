@@ -1589,10 +1589,7 @@ end
 
 function Content.fetch_catalog(client, book)
     local book_id = book.book_id or book.bookId
-    local reader_url = book.reader_url or WeRead.reader_url(book_id)
-    local catalog = client:post_json("https://weread.qq.com/web/book/chapterInfos", {
-        bookIds = { tostring(book_id) },
-    }, { referer = reader_url })
+    local catalog = client:eink_chapterinfo(book_id)
     local chapters = Content.readable_chapters(Content.normalize_chapters(catalog, book_id))
     book.chapters = chapters
     return chapters
