@@ -154,6 +154,28 @@ host:setAnnotationPrefetchEnabled(false)
 host:prefetchChapterAnnotations({ book_id = "book" }, { chapterUid = "3" })
 drain()
 assert(calls == 2)
+-- Combined EPUBs have many chapters; prefetch must still fetch current+next.
+host:setAnnotationPrefetchEnabled(true)
+context.chapters = {
+    { chapterUid = "1" }, { chapterUid = "2" }, { chapterUid = "3" },
+}
+context.ranges = {
+    ["1"] = { start_xpointer = "0" },
+    ["2"] = { start_xpointer = "2" },
+    ["3"] = { start_xpointer = "4" },
+}
+host.ui.document.getXPointer = function() return "2" end
+local before_full_book = calls
+assert(host:maybePrefetchOpenDocumentAnnotations(),
+    "full-book thought prefetch must run for the current mapped chapter")
+drain()
+assert(calls == before_full_book + 1, "next unread chapter thoughts were not downloaded")
+assert(store:get("book", "source", "3"), "chapter 3 thoughts were not stored")
+assert(store:get("book", "projection", "single:2")
+    or store:get("book", "status", "single:2"),
+    "current chapter in a combined EPUB must be matched onto the open document")
+assert(not host:maybePrefetchOpenDocumentAnnotations(),
+    "the same current/next window must not restart on every page")
 -- Multi-select keeps source catalog order, including noncontiguous choices.
 context.chapters = { { chapterUid = "1" }, { chapterUid = "2" }, { chapterUid = "3" } }
 local picker, chosen

@@ -105,6 +105,12 @@ local host = {
 for key, value in pairs(Lifecycle) do host[key] = value end
 host.detectWeReadBook = function() return nil end
 
+local open_document_prefetch = 0
+host.maybePrefetchOpenDocumentAnnotations = function()
+    open_document_prefetch = open_document_prefetch + 1
+    return true
+end
+
 expect(host:maybePrefetchNextChapter("book"), "prefetch request accepted")
 expect(#starts == 1 and starts[1].chapters[1] == chapters[2],
     "only the immediate next chapter is selected")
@@ -144,6 +150,16 @@ expect(starts[1].options.start_delay == 0.1,
 starts[1].options.on_start()
 starts[1].options.on_complete(false, "network error")
 expect(#notices == 1, "notification setting silences all prefetch notices")
+
+starts = {}
+open_document_prefetch = 0
+host.getChapterInfoFromFile = function() return nil, nil, true end
+expect(not host:maybePrefetchNextChapter("book"),
+    "combined EPUB has no next chapter file")
+expect(#starts == 0, "combined EPUB must not prefetch a chapter file")
+expect(open_document_prefetch == 1,
+    "combined EPUB still prefetches thoughts for the open document")
+host.getChapterInfoFromFile = Lifecycle.getChapterInfoFromFile
 
 local legacy_single = {
     cached_file = "/cache/one.epub",

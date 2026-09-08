@@ -170,6 +170,9 @@ end
 
 function M:onPageUpdate()
     self.progress_sync:on_page_update()
+    if self.maybePrefetchOpenDocumentAnnotations then
+        self:maybePrefetchOpenDocumentAnnotations()
+    end
 end
 
 function M:onCloseDocument()
@@ -184,6 +187,7 @@ function M:onCloseDocument()
     self.downloader:cancelPrefetch("document_closed")
     if self._cancelUnifiedAnnotationSync then self:_cancelUnifiedAnnotationSync() end
     self._annotation_pending_prefetch = nil
+    self._annotation_prefetch_signature = nil
     self._annotation_context = nil
     self._current_weread_file = nil
     self._current_weread_book_id = nil
@@ -231,6 +235,11 @@ function M:maybePrefetchNextChapter(book_id)
         and chapters[current_index + 1] or nil
     if not next_chapter then
         self.downloader:cancelPrefetch("no_next_chapter")
+        -- Combined EPUBs have no next chapter file. Thought prefetch still
+        -- applies to the current/next mapped chapter in this document.
+        if self.maybePrefetchOpenDocumentAnnotations then
+            self:maybePrefetchOpenDocumentAnnotations()
+        end
         return false
     end
 

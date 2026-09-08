@@ -609,6 +609,15 @@ function M:getSettingsMenuItems()
                                         function(touchmenu_instance)
                                             local function apply(enabled)
                                                 self:setAnnotationPrefetchEnabled(enabled)
+                                                if enabled then
+                                                    if self.maybePrefetchOpenDocumentAnnotations then
+                                                        self:maybePrefetchOpenDocumentAnnotations()
+                                                    end
+                                                    if self._current_weread_book_id then
+                                                        self:maybePrefetchNextChapter(
+                                                            self._current_weread_book_id)
+                                                    end
+                                                end
                                                 if touchmenu_instance then
                                                     touchmenu_instance:updateItems()
                                                 end

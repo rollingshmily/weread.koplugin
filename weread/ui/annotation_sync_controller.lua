@@ -338,8 +338,9 @@ function M:_runAnnotationJob(context, options)
                 context.statuses[key] = { stats = projection.stats, revision = projection.revision }
                 context.generation = (context.generation or 0) + 1
                 -- Rebuilding the overlay after every chapter of a 2000+ chapter
-                -- EPUB stalls the Kindle UI. Refresh live only on short jobs.
-                if #context.chapters <= 20 then
+                -- EPUB stalls the Kindle UI. Refresh live only on short jobs,
+                -- including a 1-2 chapter prefetch inside a huge combined book.
+                if #(options.chapters or context.chapters) <= 20 then
                     self:_refreshAnnotationOverlay()
                     UIManager:setDirty(self.dialog, "ui")
                 end
@@ -372,12 +373,14 @@ function M:_runAnnotationJob(context, options)
                 local summary = self:_annotationSummary(context)
                 if summary.chapters == #context.chapters and #context.chapters > 0 then
                     context.store:put(context.book_id, "display", context.document_key, true)
-                    if not self._unified_annotations_active then
-                        self._unified_annotations_active = true
-                        if self._xpointer_overlay then self._xpointer_overlay._annotation_window = nil end
-                        self:_refreshAnnotationOverlay()
-                        self:applyAnnotationVisibility()
-                    end
+                end
+                -- Combined EPUBs match one or two chapters at a time. Show those
+                -- results immediately; waiting for the whole book never happens.
+                if summary.chapters > 0 then
+                    self._unified_annotations_active = true
+                    if self._xpointer_overlay then self._xpointer_overlay._annotation_window = nil end
+                    self:_refreshAnnotationOverlay()
+                    self:applyAnnotationVisibility()
                 end
                 if not options.background then
                     self:showInfo(T(_("Matched %1/%2 underlines in %3/%4 chapters."),
@@ -385,6 +388,7 @@ function M:_runAnnotationJob(context, options)
                         tostring(summary.chapters), tostring(#context.chapters)))
                 end
             end
+            if done == nil then self._annotation_prefetch_signature = nil end
             if done and pending then self:_runAnnotationJob(pending.context, pending.options) end
             return
         end
@@ -531,19 +535,94 @@ function M:ensureAnnotationDisplay()
     return true
 end
 
+function M:_annotationPrefetchChapters(context)
+    if not context or #context.chapters == 0 then return {} end
+    local sources = context.store:list(context.book_id, "source_status")
+    local partials = context.store:list(context.book_id, "download")
+    local function needs_work(chapter)
+        if not chapter then return false end
+        local uid = Chapters.uid(chapter)
+        if uid == "" then return false end
+        if partials[uid] then return true end
+        local source = sources[uid]
+        if not source then return true end
+        -- Subprocess prefetch stores source without matching the open document.
+        if not context.document_key then return false end
+        local key = context.store:projectionKey(context.document_key, uid)
+        local status = context.statuses and context.statuses[key]
+        return not status or status.revision ~= source.revision
+    end
+    local selected, seen = {}, {}
+    local function add(chapter)
+        if not needs_work(chapter) then return end
+        local uid = Chapters.uid(chapter)
+        if seen[uid] then return end
+        seen[uid] = true
+        selected[#selected + 1] = chapter
+    end
+    local current = self:getCurrentMappedChapter()
+    if not current and #context.chapters == 1 then current = context.chapters[1] end
+    add(current)
+    if current then
+        local current_uid = Chapters.uid(current)
+        for index, chapter in ipairs(context.chapters) do
+            if Chapters.uid(chapter) == current_uid then
+                add(context.chapters[index + 1])
+                break
+            end
+        end
+    end
+    return selected
+end
+
+function M:maybePrefetchOpenDocumentAnnotations()
+    if not self:isAnnotationPrefetchEnabled() then return false end
+    if self._external_annotation_sync then return false end
+    if not self:isNetworkConnected() then return false end
+    local context = self._annotation_context
+    if not context or context.path ~= file(self) then
+        local ok, prepared = pcall(self._prepareAnnotationContext, self, false)
+        if not ok then return false end
+        context = prepared
+    end
+    if not context then return false end
+    if context.store:get(context.book_id, "manual_only", context.document_key) then
+        return false
+    end
+    if context.binding and context.binding.automatic == false then return false end
+    local chapters = self:_annotationPrefetchChapters(context)
+    if #chapters == 0 then return false end
+    local signature = Chapters.uid(chapters[1])
+    if chapters[2] then signature = signature .. ":" .. Chapters.uid(chapters[2]) end
+    if self._annotation_prefetch_signature == signature then return false end
+    self._annotation_prefetch_signature = signature
+    context.store:put(context.book_id, "meta", "enabled", true)
+    logger.info("prefetch open-document thoughts",
+        "book=", context.book_id, "count=", tostring(#chapters),
+        "uid=", signature)
+    self:_runAnnotationJob(context, { background = true, chapters = chapters })
+    return true
+end
+
 function M:onUnifiedAnnotationsReady()
     self._unified_annotations_active = nil
     self._annotation_context = nil
+    self._annotation_prefetch_signature = nil
     local ok, context = pcall(self._prepareAnnotationContext, self, false)
     if not ok then logger.warn("annotation context:", context); return end
     if not context then return end
     self._unified_annotations_active = self:_usesUnifiedAnnotations()
     self:_refreshAnnotationOverlay()
-    if context.store:get(context.book_id, "meta", "enabled")
-        and not context.store:get(context.book_id, "manual_only", context.document_key) then
-        -- Only already cached chapters are matched automatically on open.
-        -- Network work follows the explicit sync/prefetch path.
+    local manual_only = context.store:get(context.book_id, "manual_only", context.document_key)
+    local enabled = context.store:get(context.book_id, "meta", "enabled")
+    local prefetch = self:isAnnotationPrefetchEnabled()
+        and context.binding and context.binding.automatic ~= false
+        and self:isNetworkConnected()
+    if (enabled or prefetch) and not manual_only then
+        -- Rematch already downloaded chapters. Prefetch only current + next;
+        -- combined EPUBs must not enqueue the whole catalog.
         local cached = {}
+        local seen = {}
         local sources = context.store:list(context.book_id, "source_status")
         local partials = context.store:list(context.book_id, "download")
         for _, chapter in ipairs(context.chapters) do
@@ -555,12 +634,20 @@ function M:onUnifiedAnnotationsReady()
             if (source and (not status or status.revision ~= source.revision))
                 or (partial and self:isNetworkConnected()) then
                 cached[#cached + 1] = chapter
+                seen[uid] = true
             end
         end
-        if #context.chapters == 1 and #cached == 0 and self:isNetworkConnected()
-            and context.binding.automatic and self:isAnnotationPrefetchEnabled()
-            and not sources[Chapters.uid(context.chapters[1])] then
-            cached = context.chapters
+        if prefetch then
+            for _, chapter in ipairs(self:_annotationPrefetchChapters(context)) do
+                local uid = Chapters.uid(chapter)
+                if not seen[uid] then
+                    cached[#cached + 1] = chapter
+                    seen[uid] = true
+                end
+            end
+            if #cached > 0 then
+                context.store:put(context.book_id, "meta", "enabled", true)
+            end
         end
         if #cached > 0 then self:_runAnnotationJob(context, {
             background = true, offline = not self:isNetworkConnected(), chapters = cached }) end
@@ -590,7 +677,10 @@ function M:setAnnotationPrefetchEnabled(enabled)
     if not enabled and request and request.prefetch then
         self:_cancelUnifiedAnnotationSync()
     end
-    if not enabled then self._annotation_pending_prefetch = nil end
+    if not enabled then
+        self._annotation_pending_prefetch = nil
+        self._annotation_prefetch_signature = nil
+    end
     return true
 end
 
