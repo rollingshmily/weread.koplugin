@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.0.0-eink] (branch eink-only)
+
+### 剥离 Web
+
+- 登录只走墨水屏扫码，不再要微信 Cookie / 官方 API Key。
+- 下载只走 `chapterdownload`，失败不再回退 `e_0/e_1/e_3`。
+- 账号菜单去掉微信登录。
+
+
 ## [1.2.41]
 
 ### TXT 排版

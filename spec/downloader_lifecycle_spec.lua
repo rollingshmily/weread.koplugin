@@ -165,18 +165,15 @@ local retry_download = {
     index = 1,
     total = 1,
     failed = {},
+    workspace = { path = os.tmpname() .. "-ws" },
 }
-local scheduled_before_retry = #scheduled
-downloader:_step(retry_download)
-expect(retry_download.index == 1 and #retry_download.failed == 0,
-    "first transient chapter failure was not retained for retry")
-expect(#scheduled == scheduled_before_retry + 1,
-    "first chapter retry was not scheduled")
-scheduled[#scheduled]()
-expect(retry_download.index == 1 and #retry_download.failed == 0,
-    "second transient chapter failure was not retained for retry")
-scheduled[#scheduled]()
-expect(retry_download.index == 2 and retry_download.failed[1] == "30",
-    "chapter was not skipped after exhausting two retries")
+os.execute("mkdir -p " .. string.format("%q", retry_download.workspace.path))
+downloader.client = {
+    can_eink_download = function() return true end,
+    eink_download_to_file = function() error("eink down") end,
+}
+local ok_step, err_step = pcall(function() downloader:_step(retry_download) end)
+expect(not ok_step and tostring(err_step):find("eink", 1, true),
+    "eink download failure must be fatal")
 
 print(("downloader_lifecycle_spec: %d checks"):format(checks))

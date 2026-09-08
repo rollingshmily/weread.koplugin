@@ -579,7 +579,7 @@ function Settings:is_eink_configured()
 end
 
 function Settings:has_download_auth()
-    return self:is_cookie_configured() or self:is_eink_configured()
+    return self:is_eink_configured()
 end
 
 return Settings

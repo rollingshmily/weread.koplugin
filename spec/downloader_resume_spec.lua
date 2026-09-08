@@ -102,10 +102,10 @@ local saved_body = workspace .. "/chapters/1.xhtml"
 local body_file = assert(io.open(saved_body, "wb"))
 body_file:write("<p>already downloaded</p>")
 body_file:close()
-local fake_client = {
+local fake_client = require("spec.helpers.eink_tar_client")(root, {
     json_encode = function(_self, value) encoded_state = value return "payload" end,
     json_decode = function() return encoded_state end,
-}
+})
 local settings = {
     meta_dir = root .. "/meta",
     cache_dir = root,

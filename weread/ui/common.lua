@@ -169,15 +169,15 @@ function M:showList(title, items, empty_text, options)
     return menu
 end
 
-function M:requireLogin(require_cookie, require_api_key)
-    local missing_cookie = require_cookie and not self.settings:is_cookie_configured()
-    local missing_api_key = require_api_key and not self.settings:is_api_configured()
-    if not missing_cookie and not missing_api_key then
+function M:requireLogin(_require_cookie, _require_api_key)
+    if self.settings:is_eink_configured() then
         return true
     end
     self:showTransientInfo(_("Please scan the QR code to log in first."), 2)
     UIManager:scheduleIn(0.2, function()
-        self.qr_login:start()
+        if self.eink_qr_login then
+            self.eink_qr_login:start()
+        end
     end)
     return false
 end

@@ -103,6 +103,19 @@ package.preload["weread.lib.content"] = function()
 end
 
 local fake_client = {
+    can_eink_download = function() return true end,
+    eink_credentials = function() return "vid", "token" end,
+    eink_download_to_file = function(_self, _book_id, _param, path)
+        local src = root .. "/einksrc"
+        os.execute("mkdir -p " .. string.format("%q", src))
+        for index = 1, 3 do
+            local handle = io.open(src .. "/" .. tostring(index) .. ".txt", "wb")
+            handle:write("chapter " .. tostring(index))
+            handle:close()
+        end
+        os.execute(string.format("tar -cf %q -C %q .", path, src))
+        return "", 200, {}
+    end,
     json_encode = function(_self, value)
         payload_seq = payload_seq + 1
         local key = "payload-" .. tostring(payload_seq)
@@ -138,8 +151,7 @@ while #scheduled > 0 do
     local callback = table.remove(scheduled, 1)
     callback()
 end
-assert(runs == 4, "three chapter workers plus EPUB worker were not dispatched, runs=" .. tostring(runs))
-assert(downloader._active_job == nil, "chapter dispatch did not finish")
+assert(downloader._active_job == nil, "eink bulk dispatch did not finish")
 
 -- A worker that exhausts its retries must stop the whole full-book job
 -- immediately, instead of walking every remaining chapter.
@@ -149,8 +161,13 @@ jobs = {}
 payloads = {}
 payload_seq = 0
 local info_messages = {}
+local fail_client = {}
+for key, value in pairs(fake_client) do fail_client[key] = value end
+fail_client.eink_download_to_file = function()
+    error("eink down")
+end
 local stalled = Downloader:new{
-    client = fake_client, settings = settings,
+    client = fail_client, settings = settings,
     require_login = function() return true end,
     run_online_task = function(_label, callback) callback() return true end,
     show_info = function(text) info_messages[#info_messages + 1] = text end,
@@ -162,18 +179,14 @@ assert(stalled:start({ book_id = "book-2", title = "No result" }, {
     { chapterUid = 1, title = "1" },
     { chapterUid = 2, title = "2" },
 }, "full", { offer_read = false, chapter_concurrency = 1 }), "no-result download did not start")
-local initialize = table.remove(scheduled, 1)
-initialize()
-local dispatch = table.remove(scheduled, 1)
-local runs_before_failure = runs
-stalled._active_job.dispatch_attempts[1] = 2
-dispatch()
+while #scheduled > 0 do
+    local callback = table.remove(scheduled, 1)
+    callback()
+end
 assert(stalled._active_job == nil,
-    "terminal chapter failure did not stop the full-book job")
-assert(runs == runs_before_failure,
-    "remaining chapters were launched after terminal failure")
-assert(#info_messages == 1 and tostring(info_messages[1]):find("stopped", 1, true),
-    "terminal chapter failure did not show an immediate stop message")
+    "eink download failure did not stop the full-book job")
+assert(#info_messages >= 1 and tostring(info_messages[1]):find("failed", 1, true),
+    "eink download failure did not show an error")
 
 -- Pausing stops active workers without cancelling the checkpoint; continuing
 -- reuses the same job and schedules the next dispatch poll.

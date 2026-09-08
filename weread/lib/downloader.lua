@@ -244,7 +244,7 @@ function Downloader:_loadEinkBulk(dl)
     end
     dl.eink_tried = true
     if not self.client.can_eink_download or not self.client:can_eink_download() then
-        return
+        error("eink login required")
     end
     local bulk_ok, packed = pcall(function()
         local uids = {}
@@ -299,9 +299,7 @@ function Downloader:_loadEinkBulk(dl)
         }
     end)
     if not bulk_ok or type(packed) ~= "table" then
-        logger.warn("eink zip download failed, falling back to web chapters:",
-            log_error(packed))
-        return
+        error("eink zip download failed: " .. log_error(packed))
     end
     local function apply_chapter_files(info)
         if type(info) ~= "table" then

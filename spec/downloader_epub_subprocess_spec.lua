@@ -82,7 +82,7 @@ package.preload["weread.lib.content"] = function()
     }
 end
 
-local fake_client = {
+local fake_client = require("spec.helpers.eink_tar_client")(root, {
     json_encode = function(_self, value)
         payload_seq = payload_seq + 1
         local key = "payload-" .. tostring(payload_seq)
@@ -90,7 +90,7 @@ local fake_client = {
         return key
     end,
     json_decode = function(_self, value) return payloads[value] end,
-}
+})
 local settings = {
     meta_dir = root .. "/meta", cache_dir = root,
     get = function(_self, key, default)
