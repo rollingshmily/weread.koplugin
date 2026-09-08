@@ -91,11 +91,13 @@ function M:getMainMenuItems()
             text_func = function()
                 if self.settings:is_eink_configured() then
                     local eink = self.settings:get("eink", {}) or {}
-                    local vid = tostring(eink.vid or "")
-                    if vid == "" then
-                        vid = _("Eink account")
+                    local account = self.settings:get("account", {}) or {}
+                    local label = tostring(eink.vid or "")
+                    if type(account.name) == "string" and account.name ~= ""
+                        and account.login_method == "eink_qr" then
+                        label = account.name
                     end
-                    return T(_("Eink logged in · %1"), vid)
+                    return T(_("Eink logged in · %1"), label)
                 end
                 return _("Eink QR login")
             end,

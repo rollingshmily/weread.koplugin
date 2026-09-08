@@ -490,9 +490,8 @@ end
 
 function Settings:is_eink_configured()
     local eink = self:get("eink", {}) or {}
-    local cookies = self:get("cookies", {}) or {}
-    local vid = tostring(eink.vid or cookies.wr_vid or "")
-    local token = tostring(eink.access_token or cookies.wr_skey or "")
+    local vid = tostring(eink.vid or "")
+    local token = tostring(eink.access_token or "")
     return vid ~= "" and token ~= ""
 end
 
