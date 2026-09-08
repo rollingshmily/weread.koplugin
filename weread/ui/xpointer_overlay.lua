@@ -128,8 +128,11 @@ function Overlay:_computeVisible()
 
     local top = tonumber(document:getCurrentPos()) or 0
     local height = self.ui.dimen and tonumber(self.ui.dimen.h) or 0
-    local visible_pages = type(document.getVisiblePageCount) == "function"
-        and tonumber(document.getVisiblePageCount()) or 1
+    local visible_pages = 1
+    if type(document.getVisiblePageCount) == "function" then
+        local ok_count, count = pcall(document.getVisiblePageCount, document)
+        visible_pages = ok_count and tonumber(count) or 1
+    end
     local bottom = top + height * math.max(1, visible_pages or 1)
     local visible = {}
     local candidates = 0
@@ -203,7 +206,18 @@ function Overlay:paintTo(bb, x, y)
         boxes = cached.boxes
         candidates = cached.candidates
     else
-        boxes, candidates = self:_computeVisible()
+        local ok_visible, computed, count = pcall(self._computeVisible, self)
+        if not ok_visible then
+            self.visible = {}
+            self.last_metrics = {
+                candidates = 0,
+                boxes = 0,
+                elapsed_ms = (self.clock() - started) * 1000,
+                cache_hit = false,
+            }
+            return
+        end
+        boxes, candidates = computed, count
         if can_cache then
             self.cache[cache_key] = {
                 boxes = boxes,

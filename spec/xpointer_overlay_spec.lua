@@ -17,7 +17,10 @@ local positions = {
 local document = {
     getCurrentPos = function() return 100 end,
     getCurrentPage = function() return 4 end,
-    getVisiblePageCount = function() return 1 end,
+    getVisiblePageCount = function(self)
+        expect(self ~= nil, "getVisiblePageCount must receive the document")
+        return 1
+    end,
     getPosFromXPointer = function(_self, xp) return positions[xp] end,
     getScreenBoxesFromPositions = function(_self, pos0)
         box_calls = box_calls + 1
@@ -66,7 +69,10 @@ local comparisons, position_calls = 0, 0
 local ordered_document = {
     getCurrentPos = function() return 50 end,
     getCurrentPage = function() return 50 end,
-    getVisiblePageCount = function() return 1 end,
+    getVisiblePageCount = function(self)
+        expect(self ~= nil, "ordered getVisiblePageCount must receive the document")
+        return 1
+    end,
     getPageXPointer = function(_self, page) return page end,
     compareXPointers = function(_self, a, b)
         comparisons = comparisons + 1

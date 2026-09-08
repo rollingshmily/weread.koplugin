@@ -150,6 +150,25 @@ expect(settings:find_book_id_by_path("/books/flat-chapter-1.epub") == "flat",
 expect(settings:find_book_id_by_path("/books/missing.epub") == nil,
     "raw book indexes miss unrelated paths")
 
+local lfs = require("libs/libkoreader-lfs")
+local previous_attributes = lfs.attributes
+lfs.attributes = function(path, field)
+    if field == "mode" and path == "/books/fanren - full.epub" then
+        return "file"
+    end
+    if previous_attributes then return previous_attributes(path, field) end
+end
+values.books.fanren = {
+    cached_file = "/books/fanren (tv) - full.epub",
+    cached_full_book = "/books/fanren (tv) - full.epub",
+}
+expect(settings:find_book_id_by_path("/books/fanren - full.epub") == "fanren",
+    "renamed full-book EPUB is remapped onto the stored WeRead book")
+expect(values.books.fanren.cached_file == "/books/fanren - full.epub"
+        and values.books.fanren.cached_full_book == "/books/fanren - full.epub",
+    "renamed full-book path was not persisted")
+lfs.attributes = previous_attributes
+
 settings:update_book("42", { progress = 12, last_sync_error = false })
 expect(saved_books["42"].progress == 12
     and saved_books["42"].last_sync_error == nil,

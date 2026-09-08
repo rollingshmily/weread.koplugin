@@ -243,6 +243,38 @@ function Settings:new()
     return setmetatable(obj, self)
 end
 
+local function path_basename(path)
+    return (tostring(path):match("([^/\\]+)$")) or path
+end
+
+local function path_dirname(path)
+    return tostring(path):match("^(.*)[/\\][^/\\]+$") or ""
+end
+
+local function normalize_epub_filename(name)
+    name = tostring(name or ""):gsub("%.epub$", "")
+    -- Fullwidth （...） and ASCII (...).
+    name = name:gsub("\239\188\136.-\239\188\137", ""):gsub("%([^%)]-%)", "")
+    return name:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function is_existing_file(path)
+    return type(path) == "string" and path ~= ""
+        and lfs.attributes(path, "mode") == "file"
+end
+
+local function remap_stored_paths(index, old_path, new_path)
+    if index.cached_file == old_path then index.cached_file = new_path end
+    if index.cached_full_book == old_path then index.cached_full_book = new_path end
+    if type(index.cached_chapters) == "table" then
+        for uid, chapter_path in pairs(index.cached_chapters) do
+            if chapter_path == old_path then
+                index.cached_chapters[uid] = new_path
+            end
+        end
+    end
+end
+
 function Settings:find_book_id_by_path(file_path)
     local started = time.now()
     if type(file_path) ~= "string" or file_path == "" then
@@ -255,13 +287,32 @@ function Settings:find_book_id_by_path(file_path)
     local indexes = self.store:readSetting("books", {})
     for book_id, index in pairs(indexes or {}) do
         if type(index) == "table" then
-            if index.cached_file == file_path then
+            if index.cached_file == file_path or index.cached_full_book == file_path then
                 perf("path_index.hit", started, "kind=full_book")
                 return tostring(book_id)
             end
             for _uid, chapter_path in pairs(index.cached_chapters or {}) do
                 if chapter_path == file_path then
                     perf("path_index.hit", started, "kind=chapter")
+                    return tostring(book_id)
+                end
+            end
+        end
+    end
+    if is_existing_file(file_path) then
+        local new_dir = path_dirname(file_path)
+        local new_name = normalize_epub_filename(path_basename(file_path))
+        for book_id, index in pairs(indexes or {}) do
+            if type(index) == "table" then
+                local stored = index.cached_full_book or index.cached_file
+                if type(stored) == "string" and stored ~= file_path
+                    and path_dirname(stored) == new_dir
+                    and not is_existing_file(stored)
+                    and normalize_epub_filename(path_basename(stored)) == new_name then
+                    remap_stored_paths(index, stored, file_path)
+                    self.store:saveSetting("books", indexes)
+                    self.store:flush()
+                    perf("path_index.hit", started, "kind=renamed")
                     return tostring(book_id)
                 end
             end
