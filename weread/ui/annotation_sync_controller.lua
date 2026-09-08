@@ -649,6 +649,8 @@ function M:getUnifiedAnnotationMenuItems()
         { text = binding and T(_("Linked WeRead book: %1"), binding.title or binding.book_id)
                 or _("Match with WeRead book"),
             callback = function(menu) self:bindExternalAnnotationsBook(menu) end },
+        { text = _("Download thoughts for this chapter"), callback = function()
+            self:downloadCurrentChapterThoughts() end },
         { text_func = function()
                 local context = self._annotation_context
                 if not context then return _("Continue matching") end
