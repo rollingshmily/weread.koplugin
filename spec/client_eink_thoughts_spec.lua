@@ -157,6 +157,39 @@ do
     expect(fetches == 1, "bestbookmarks is cached per book, not per chapter")
 end
 
+do
+    local eink = { vid = "1", access_token = "t" }
+    local best_calls = 0
+    local client = make_client {
+        settings = {
+            get = function(_self, key)
+                if key == "eink" then return eink end
+            end,
+            set = function(_self, key, value)
+                if key == "eink" then eink = value end
+            end,
+            flush = function() end,
+        },
+        eink_bookmarklist = function(self)
+            self:mark_eink_auth_failed()
+            error("HTTP 401")
+        end,
+        eink_bestbookmarks = function()
+            best_calls = best_calls + 1
+            return { updated = {} }
+        end,
+        gateway = function()
+            return { underlines = { { range = "8-9" } } }
+        end,
+    }
+    expect(client:can_eink_download(), "stored eink creds start usable")
+    local ok, data = client:get_chapter_underlines("book", 1)
+    expect(ok and data.underlines[1].range == "8-9", "401 falls back to web")
+    expect(best_calls == 0, "expired eink must not hit bestbookmarks")
+    expect(not client:can_eink_download(), "later thought requests skip eink")
+    expect(eink.auth_failed == true, "eink expiry is remembered")
+end
+
 print(string.format(
     "client_eink_thoughts_spec: %d checks, %d failure(s)", checks, failures))
 os.exit(failures == 0 and 0 or 1)

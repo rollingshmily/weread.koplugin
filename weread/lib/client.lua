@@ -272,6 +272,8 @@ function Client:request(opts)
     req_opts.redirect = false
     local diagnostic_api = req_opts.diagnostic_api
     req_opts.diagnostic_api = nil
+    local log_http_errors = req_opts.log_http_errors
+    req_opts.log_http_errors = nil
 
     local results = { pcall(http.request, req_opts) }
     socketutil:reset_timeout()
@@ -299,7 +301,7 @@ function Client:request(opts)
     end
 
     local code = tonumber(raw_code)
-    if code and code >= 400 then
+    if code and code >= 400 and log_http_errors ~= false then
         log_response("HTTP response failed:", {
             method = req_opts.method,
             url = req_opts.url,
@@ -787,9 +789,12 @@ function Client:get_chapter_underlines(book_id, chapter_uid)
         if ok_own and type(own) == "table" and not eink_payload_error(own) then
             own_items = own.updated
         end
-        local ok_best, best = pcall(function()
-            return self:eink_bestbookmarks(book_id)
-        end)
+        local ok_best, best = false, nil
+        if self:can_eink_download() then
+            ok_best, best = pcall(function()
+                return self:eink_bestbookmarks(book_id)
+            end)
+        end
         if ok_best and type(best) == "table" and not eink_payload_error(best) then
             local rows, seen = {}, {}
             merge_chapter_underlines(rows, seen,
@@ -957,8 +962,28 @@ function Client:eink_credentials()
     return vid, token
 end
 
+function Client:mark_eink_auth_failed()
+    if self._eink_auth_failed then return end
+    self._eink_auth_failed = true
+    local settings = self.settings
+    if settings and type(settings.get) == "function" and type(settings.set) == "function" then
+        local eink = settings:get("eink", {}) or {}
+        eink.auth_failed = true
+        settings:set("eink", eink)
+        if type(settings.flush) == "function" then settings:flush() end
+    end
+    logger.warn("eink login expired; falling back to web until you scan again")
+end
+
 function Client:can_eink_download()
-    return self:eink_credentials() ~= nil
+    if not self:eink_credentials() then return false end
+    if self._eink_auth_failed then return false end
+    local eink = self.settings and self.settings.get and self.settings:get("eink", {}) or {}
+    if eink.auth_failed == true then
+        self._eink_auth_failed = true
+        return false
+    end
+    return true
 end
 
 local function eink_body_preview(body)
@@ -1012,7 +1037,9 @@ function Client:eink_request(path, params)
             ["channelId"] = "900",
         },
         diagnostic_api = path,
+        log_http_errors = false,
     })
+    if tonumber(code) == 401 then self:mark_eink_auth_failed() end
     return body, code, headers or {}
 end
 
@@ -1053,7 +1080,9 @@ function Client:eink_post_json(path, payload)
         },
         body = self:json_encode(payload or {}),
         diagnostic_api = path,
+        log_http_errors = false,
     })
+    if tonumber(code) == 401 then self:mark_eink_auth_failed() end
     if not code or code < 200 or code >= 300 then
         error("eink POST " .. path .. " failed: HTTP " .. tostring(code or "unknown"))
     end
