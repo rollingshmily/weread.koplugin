@@ -163,6 +163,7 @@ host.detectWeReadBook = function() return nil end
 local local_reader_items = host:getMainMenuItems()
 expect(not menu_has(local_reader_items, "Sync progress now")
         and not menu_has(local_reader_items, "Book details")
+        and menu_has(local_reader_items, "Download thoughts for this chapter")
         and menu_has(local_reader_items, "Underlines and thoughts management"),
     "local document menu retained WeRead-only book actions")
 
@@ -170,6 +171,7 @@ host.detectWeReadBook = function() return "book-1" end
 local weread_reader_items = host:getMainMenuItems()
 expect(menu_has(weread_reader_items, "Sync progress now")
         and menu_has(weread_reader_items, "Book details")
+        and menu_has(weread_reader_items, "Download thoughts for this chapter")
         and menu_has(weread_reader_items, "Underlines and thoughts management"),
     "WeRead book menu retained the local-book annotation submenu")
 
@@ -177,6 +179,7 @@ host.detectWeReadBook = function() return "mp-book" end
 local mp_reader_items = host:getMainMenuItems()
 expect(not menu_has(mp_reader_items, "Sync progress now")
         and menu_has(mp_reader_items, "Book details")
+        and menu_has(mp_reader_items, "Download thoughts for this chapter")
         and menu_has(mp_reader_items, "Underlines and thoughts management"),
     "public-account menu exposed unsupported progress or local-book actions")
 

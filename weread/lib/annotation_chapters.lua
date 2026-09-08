@@ -150,6 +150,33 @@ function Chapters.map(document, catalog, descriptor)
     return selected, ranges
 end
 
+-- Last mapped chapter whose start XPointer is at or before `point`.
+function Chapters.at_xpointer(document, chapters, ranges, point)
+    if type(chapters) ~= "table" or #chapters == 0 then return nil end
+    if type(ranges) ~= "table" or not point or not document
+        or type(document.compareXPointers) ~= "function" then
+        return nil
+    end
+    local low, high, result = 1, #chapters, nil
+    while low <= high do
+        local middle = math.floor((low + high) / 2)
+        local range = ranges[Chapters.uid(chapters[middle])]
+        if not range or not range.start_xpointer then
+            high = middle - 1
+        else
+            local ok, cmp = pcall(document.compareXPointers, document,
+                range.start_xpointer, point)
+            if not ok or cmp == nil then return result end
+            if cmp == 0 or cmp == 1 then
+                result, low = chapters[middle], middle + 1
+            else
+                high = middle - 1
+            end
+        end
+    end
+    return result
+end
+
 function Chapters.descriptor(book, path)
     if not book then return nil end
     local explicit = book.annotation_documents and book.annotation_documents[path]

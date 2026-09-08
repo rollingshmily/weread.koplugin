@@ -278,6 +278,12 @@ function M:getMainMenuItems()
         }
         if self:_xpointerOverlayPrototypeAvailable() then
             reader_items[#reader_items + 1] = {
+                text = _("Download thoughts for this chapter"),
+                callback = self:safeCallback(_("Download thoughts for this chapter"), function()
+                    self:downloadCurrentChapterThoughts()
+                end),
+            }
+            reader_items[#reader_items + 1] = {
                 text = _("Underlines and thoughts management"),
                 enabled_func = function()
                     return self:_xpointerOverlayPrototypeAvailable()

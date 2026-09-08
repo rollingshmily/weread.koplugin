@@ -27,4 +27,14 @@ assert(#Chapters.descriptor(book, "chapter.epub").chapters == 1)
 assert(not Chapters.descriptor(book, "legacy-full.epub"), "legacy partial file was assumed to be complete")
 local _, sparse = Chapters.map(doc, { catalog[1], catalog[3] })
 assert(sparse["9"].end_xpointer == "10", "an unmatched sibling leaked into the previous chapter")
+local order = { ["0"] = 0, ["10"] = 10, ["20"] = 20, here = 12 }
+local xp_doc = {
+    compareXPointers = function(_self, a, b)
+        local pa, pb = order[a], order[b]
+        if pa < pb then return 1 elseif pa > pb then return -1 else return 0 end
+    end,
+}
+local _, full_ranges = Chapters.map(doc, catalog)
+local located = Chapters.at_xpointer(xp_doc, catalog, full_ranges, "here")
+assert(located and located.chapterUid == "12", "current chapter was not resolved from xpointer")
 print("annotation_chapters_spec: nested TOC, UTF-8 titles and noncontiguous selections passed")

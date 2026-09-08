@@ -434,6 +434,47 @@ function M:_runAnnotationJob(context, options)
     UIManager:scheduleIn(0.01, safe_step)
 end
 
+function M:getCurrentMappedChapter()
+    local context = self._annotation_context
+    if not context or context.path ~= file(self) then
+        context = self:_prepareAnnotationContext(false)
+    end
+    if not context or #context.chapters == 0 or not self.ui or not self.ui.document then
+        return nil, context
+    end
+    local document = self.ui.document
+    local point = document.getXPointer and document:getXPointer()
+    return Chapters.at_xpointer(document, context.chapters, context.ranges, point), context
+end
+
+function M:downloadCurrentChapterThoughts()
+    if not self:_xpointerOverlayPrototypeAvailable() then
+        self:showInfo(_("Annotation matching requires a reflowable document."))
+        return
+    end
+    if not self:_annotationBinding() then
+        self:bindExternalAnnotationsBook()
+        return
+    end
+    local function start(online)
+        if online then self:_prepareAnnotationContext(true) end
+        local chapter = self:getCurrentMappedChapter()
+        if not chapter then
+            self:showInfo(_("Could not determine the current chapter."))
+            return
+        end
+        logger.info("download current chapter thoughts uid=", Chapters.uid(chapter))
+        self:startUnifiedAnnotationSync({ chapters = { chapter } })
+    end
+    local chapter = self:getCurrentMappedChapter()
+    if chapter then
+        start(false)
+        return
+    end
+    if not self:requireLogin(true, true) then return end
+    return self:runOnlineTask(_("Loading chapter list..."), function() start(true) end)
+end
+
 function M:startUnifiedAnnotationSync(options)
     options = options or {}
     if not self:_annotationBinding() then self:bindExternalAnnotationsBook(); return end
@@ -616,6 +657,8 @@ function M:getUnifiedAnnotationMenuItems()
                     tostring(summary.chapters), tostring(#context.chapters), tostring(summary.located))
             end, text = _("Continue matching"), callback = function()
             self:startUnifiedAnnotationSync({ offline = not self:isNetworkConnected() }) end },
+        { text = _("Download thoughts for this chapter"), callback = function()
+            self:downloadCurrentChapterThoughts() end },
         { text = _("Choose chapters to match"), callback = function()
             self:chooseAnnotationChapters()
         end },
