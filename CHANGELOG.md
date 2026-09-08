@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.20]
+
+### 墨水屏扫码登录入口
+
+- 主菜单和「账号管理」增加墨水屏扫码登录，和现有 Web 扫码并存。
+- 墨水屏凭证写入 `eink`（vid / accessToken），不覆盖 Web Cookie。
+- 账号状态展示 Eink 是否已配置。
+
+### 验证
+
+- Lua spec 需全绿。
+- luacheck：0 warnings / 0 errors。
+
+
 ## [1.2.19]
 
 ### 墨水屏 ZIP 下载（兼容旧 Web 通道）

@@ -16,6 +16,7 @@ local PluginUtil = require("weread.lib.plugin_util")
 local ProgressSync = require("weread.lib.progress_sync")
 local ProgressSyncDialog = require("weread.ui.progress_sync_dialog")
 local QRLogin = require("weread.lib.qr_login")
+local EinkQRLogin = require("weread.lib.eink_qr_login")
 local ReadReport = require("weread.lib.read_report")
 local Settings = require("weread.lib.settings")
 
@@ -109,6 +110,7 @@ function WeReadPlugin:init()
         end
     end
     self.qr_login = QRLogin:new(self, self.client, self.settings)
+    self.eink_qr_login = EinkQRLogin:new(self, self.client, self.settings)
     self.read_report = ReadReport:new{
         settings = self.settings,
         client = self.client,

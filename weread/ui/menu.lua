@@ -88,6 +88,27 @@ function M:getMainMenuItems()
             end),
         },
         {
+            text_func = function()
+                if self.settings:is_eink_configured() then
+                    local eink = self.settings:get("eink", {}) or {}
+                    local vid = tostring(eink.vid or "")
+                    if vid == "" then
+                        vid = _("Eink account")
+                    end
+                    return T(_("Eink logged in · %1"), vid)
+                end
+                return _("Eink QR login")
+            end,
+            keep_menu_open = true,
+            callback = self:safeCallback(_("Eink QR login"), function()
+                if self.settings:is_eink_configured() then
+                    self:showAccountStatus()
+                else
+                    self.eink_qr_login:start()
+                end
+            end),
+        },
+        {
             text = _("Bookshelf"),
             callback = self:safeCallback(_("Bookshelf"), function()
                 self:showBookshelf()
@@ -739,6 +760,18 @@ function M:getSettingsMenuItems()
                         keep_menu_open = true,
                         callback = self:safeCallback(_("Account status"), function()
                             self:showAccountStatus()
+                        end),
+                    },
+                    {
+                        text_func = function()
+                            if self.settings:is_eink_configured() then
+                                return _("Eink QR login (replace)")
+                            end
+                            return _("Eink QR login")
+                        end,
+                        keep_menu_open = true,
+                        callback = self:safeCallback(_("Eink QR login"), function()
+                            self.eink_qr_login:start()
                         end),
                     },
                     {

@@ -98,6 +98,9 @@ end
 package.preload["weread.lib.qr_login"] = function()
     return { new = function() return { kind = "qr_login" } end }
 end
+package.preload["weread.lib.eink_qr_login"] = function()
+    return { new = function() return { kind = "eink_qr_login" } end }
+end
 package.preload["weread.lib.read_report"] = function()
     return {
         new = function(_self, options)

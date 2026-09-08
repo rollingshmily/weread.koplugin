@@ -213,14 +213,23 @@ function M:showAccountStatus()
         account_name = (self.settings:is_cookie_configured() or self.settings:is_api_configured())
             and _("Unknown account") or _("Not logged in")
     end
-    local login_method = account.login_method == "qr" and _("QR login") or _("Unknown")
+    local login_method
+    if account.login_method == "qr" then
+        login_method = _("QR login")
+    elseif account.login_method == "eink_qr" then
+        login_method = _("Eink QR login")
+    else
+        login_method = _("Unknown")
+    end
     local cookie_status = self.settings:is_cookie_configured() and _("configured") or _("missing")
     local api_status = self.settings:is_api_configured() and _("configured") or _("missing")
+    local eink_status = self.settings:is_eink_configured() and _("configured") or _("missing")
     self:showInfo(T(
-        _("Account: %1\nLogin method: %2\nCookie: %3\nOfficial API key: %4\nBook directory:\n%5\nMetadata directory:\n%6"),
+        _("Account: %1\nLogin method: %2\nCookie: %3\nEink: %4\nOfficial API key: %5\nBook directory:\n%6\nMetadata directory:\n%7"),
         account_name,
         login_method,
         cookie_status,
+        eink_status,
         api_status,
         BD.dirpath(self.settings.cache_dir),
         BD.dirpath(self.settings.meta_dir)
@@ -233,6 +242,7 @@ function M:confirmClearAccount()
         ok_text = _("Clear"),
         ok_callback = self:safeCallback(_("Clear"), function()
             self.qr_login:cancel()
+            if self.eink_qr_login then self.eink_qr_login:cancel() end
             self.read_report:stop("account_cleared")
             self.settings:reset_account()
             if self.onWeReadAccountChanged then
