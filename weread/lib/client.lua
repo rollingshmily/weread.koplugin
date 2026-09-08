@@ -720,10 +720,8 @@ function Client:get_mp_content(review_id, opts)
     error(http_error(self, code, text, resp_headers))
 end
 
-function Client:report_read(payload, referer)
-    return self:post_json("https://weread.qq.com/web/book/read", payload, {
-        referer = referer or "https://weread.qq.com/",
-    })
+function Client:report_read(payload, _referer)
+    return self:eink_post_json("/book/read", payload)
 end
 
 function Client:get_chapter_underlines(book_id, chapter_uid)
@@ -792,7 +790,7 @@ function Client:get_chapter_reviews_batch(book_id, chapter_uid, batch)
     end
 
     local ok, result = pcall(function()
-        return self:gateway("/book/readreviews", {
+        return self:eink_post_json("/book/readreviews", {
             bookId = tostring(book_id),
             chapterUid = chapter_uid,
             reviews = batch,
@@ -941,6 +939,42 @@ function Client:eink_request(path, params)
         diagnostic_api = path,
     })
     return body, code, headers or {}
+end
+
+function Client:eink_post_json(path, payload)
+    local vid, token = self:eink_credentials()
+    if not vid then
+        error("eink credentials are missing")
+    end
+    local body, code = self:request({
+        url = "https://i.weread.qq.com" .. path,
+        method = "POST",
+        skip_cookie = true,
+        persist_response_cookies = false,
+        timeout = { 30, 180 },
+        headers = {
+            ["User-Agent"] = Eink.USER_AGENT,
+            ["Accept"] = "*/*",
+            ["Content-Type"] = "application/json;charset=UTF-8",
+            ["vid"] = vid,
+            ["accessToken"] = token,
+            ["appver"] = Eink.APPVER,
+            ["basever"] = Eink.APPVER,
+            ["baseapi"] = "30",
+            ["osver"] = "11",
+            ["channelId"] = "900",
+        },
+        body = self:json_encode(payload or {}),
+        diagnostic_api = path,
+    })
+    if not code or code < 200 or code >= 300 then
+        error("eink POST " .. path .. " failed: HTTP " .. tostring(code or "unknown"))
+    end
+    return self:decode_http_json(body, {
+        method = "POST",
+        url = path,
+        code = code,
+    })
 end
 
 function Client:eink_chapterinfo(book_id)

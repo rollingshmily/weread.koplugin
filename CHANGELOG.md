@@ -9,6 +9,7 @@
 - 账号菜单去掉微信登录。
 - 书架 `/shelf/sync`、进度 `/book/getProgress`、搜索 `/store/search`、目录 `chapterinfo` 走 eink。
 - 划线走 `bookmarklist` + `bestbookmarks`，不再打 Skill gateway。
+- 想法 `/book/readreviews`、阅读上报 `/book/read` 走 eink POST。
 
 
 ## [1.2.41]
