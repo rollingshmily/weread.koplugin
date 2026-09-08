@@ -846,8 +846,7 @@ function ProgressSync:_pull(options)
             return false
         end
     end
-    if not self.settings:is_api_configured()
-        and not self.settings:is_cookie_configured() then
+    if not self.settings:is_eink_configured() then
         if options.manual then self.notify("authentication_required", {}) end
         return false
     end

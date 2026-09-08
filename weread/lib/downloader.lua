@@ -1090,7 +1090,7 @@ function Downloader:start(book, chapters, suffix, options)
         if self.settings.has_download_auth then
             return self.settings:has_download_auth()
         end
-        return self.settings.is_cookie_configured and self.settings:is_cookie_configured()
+        return self.settings.is_eink_configured and self.settings:is_eink_configured()
     end
     if options.prefetch and not has_download_auth() then
         if type(options.on_complete) == "function" then

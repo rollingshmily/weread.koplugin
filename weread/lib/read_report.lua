@@ -480,8 +480,8 @@ function ReadReport:_precheck()
     self.current_book_title = title
     self.current_book_source = source
 
-    if not self.settings:is_cookie_configured() then
-        self:_set_error("cookie not configured", "authentication", "read report skipped:")
+    if not self.settings:is_eink_configured() then
+        self:_set_error("eink not configured", "authentication", "read report skipped:")
         return false
     end
     if not self.is_online() then
@@ -1009,8 +1009,8 @@ function ReadReport:ensure_context(book_id, force)
     if book_id == "" then
         error("missing book id")
     end
-    if not self.settings:is_cookie_configured() then
-        error("cookie not configured")
+    if not self.settings:is_eink_configured() then
+        error("eink not configured")
     end
 
     local books = self.settings:get("books", {})

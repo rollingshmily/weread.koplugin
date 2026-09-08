@@ -210,27 +210,23 @@ function M:showAccountStatus()
     local account = self.settings:get("account", {})
     local account_name = type(account.name) == "string" and account.name or ""
     if account_name == "" then
-        account_name = (self.settings:is_cookie_configured() or self.settings:is_api_configured())
-            and _("Unknown account") or _("Not logged in")
+        local eink = self.settings:get("eink", {}) or {}
+        local eink_name = tostring(eink.name or "")
+        if eink_name ~= "" then
+            account_name = eink_name
+        elseif self.settings:is_eink_configured() then
+            account_name = _("Unknown account")
+        else
+            account_name = _("Not logged in")
+        end
     end
-    local login_method
-    if account.login_method == "qr" then
-        login_method = _("QR login")
-    elseif account.login_method == "eink_qr" then
-        login_method = _("Eink QR login")
-    else
-        login_method = _("Unknown")
-    end
-    local cookie_status = self.settings:is_cookie_configured() and _("configured") or _("missing")
-    local api_status = self.settings:is_api_configured() and _("configured") or _("missing")
+    local login_method = self.settings:is_eink_configured() and _("Eink QR login") or _("Unknown")
     local eink_status = self.settings:is_eink_configured() and _("configured") or _("missing")
     self:showInfo(T(
-        _("Account: %1\nLogin method: %2\nCookie: %3\nEink: %4\nOfficial API key: %5\nBook directory:\n%6\nMetadata directory:\n%7"),
+        _("Account: %1\nLogin method: %2\nEink: %3\nBook directory:\n%4\nMetadata directory:\n%5"),
         account_name,
         login_method,
-        cookie_status,
         eink_status,
-        api_status,
         BD.dirpath(self.settings.cache_dir),
         BD.dirpath(self.settings.meta_dir)
     ))
@@ -273,7 +269,7 @@ end
 
 function M:confirmClearEinkAccount()
     UIManager:show(ConfirmBox:new{
-        text = _("Sign out eink login? Full-book fast download will fall back to web."),
+        text = _("Sign out eink login? Bookshelf, download and progress will need login again."),
         ok_text = _("Sign out"),
         ok_callback = self:safeCallback(_("Sign out"), function()
             if self.eink_qr_login then self.eink_qr_login:cancel() end

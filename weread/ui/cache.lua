@@ -758,8 +758,8 @@ function M:fetchShelfAllowedMap()
 end
 
 function M:confirmScanLocalCache()
-    if not self.settings:is_api_configured() then
-        self:showInfo(_("Scanning requires the official API key to match folders against your WeRead shelf."))
+    if not self.settings:is_eink_configured() then
+        self:showInfo(_("Scanning requires eink login to match folders against your WeRead shelf."))
         return
     end
     self:runOnlineTask(_("Scan and match local books"), function()
@@ -791,7 +791,7 @@ end
 -- or network the scan is silently skipped; it can be run later from Cache
 -- management.
 function M:offerScanNewDir(new_dir, base_message)
-    if not self.settings:is_api_configured() or not self:isNetworkOnline() then
+    if not self.settings:is_eink_configured() or not self:isNetworkOnline() then
         self:showInfo(base_message)
         return
     end

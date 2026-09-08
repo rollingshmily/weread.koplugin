@@ -85,6 +85,7 @@ local function fixture(provider)
             return {}
         end,
         is_cookie_configured = function() return true end,
+        is_eink_configured = function() return true end,
     }
     local client = {
         report_read = function(_self, payload)
