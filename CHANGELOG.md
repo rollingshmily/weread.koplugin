@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.26]
+
+### 墨水屏 tar 章节映射
+
+- 1.2.25 能解开 tar 并打 `eink zip download ready`，但只认 `.xhtml/.html`。TXT 网文（如 2000+ 章）映射为 0，随后静默走 web 逐章。
+- 按 `chapter.files` / 章节 uid / 文件名 basename 匹配 `.txt`、无后缀和 xhtml。
+- 纯文本自动包一层 xhtml。
+- tar 认历史 typeflag 空格和 ustar prefix。
+- 日志增加 `files=` `mapped=`；mapped=0 时打出样本文件名。
+
+
 ## [1.2.25]
 
 ### 墨水屏 ZIP/tar

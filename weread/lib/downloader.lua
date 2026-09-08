@@ -274,7 +274,22 @@ function Downloader:_loadEinkBulk(dl)
     end
     dl.eink_files = files
     dl.eink_bodies, dl.eink_assets = Eink.files_to_chapter_bodies(files, dl.chapters)
-    logger.info("eink zip download ready")
+    local file_count, mapped = 0, 0
+    for _name in pairs(files) do
+        file_count = file_count + 1
+    end
+    for _uid, body in pairs(dl.eink_bodies or {}) do
+        if type(body) == "string" and body ~= "" then
+            mapped = mapped + 1
+        end
+    end
+    logger.info("eink zip download ready", "files=", tostring(file_count),
+        "mapped=", tostring(mapped), "chapters=", tostring(#(dl.chapters or {})))
+    if mapped == 0 then
+        local sample = Eink.sample_file_names(files, 8)
+        logger.warn("eink zip mapped 0 chapters; sample files:",
+            table.concat(sample, ", "))
+    end
 end
 
 function Downloader:_tryEinkBulkCheckpoint(dl)

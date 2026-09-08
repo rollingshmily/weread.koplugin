@@ -311,6 +311,14 @@ function Eink.untar(data)
         local name = block:sub(1, 100):gsub("%z.*", "")
         local size = tar_octal(block:sub(125, 136))
         local typeflag = block:sub(157, 157)
+        local prefix = block:sub(346, 500):gsub("%z.*", "")
+        if prefix ~= "" then
+            if name == "" then
+                name = prefix
+            else
+                name = prefix .. "/" .. name
+            end
+        end
         off = off + 512
         local payload = ""
         if size > 0 then
@@ -318,7 +326,9 @@ function Eink.untar(data)
             local padded = math.floor((size + 511) / 512) * 512
             off = off + padded
         end
-        if name ~= "" and (typeflag == "" or typeflag == "0" or typeflag == "\0") then
+        -- Regular files: POSIX '0'/NUL, historic tar space.
+        if name ~= "" and (typeflag == "" or typeflag == "0"
+            or typeflag == "\0" or typeflag == " ") then
             files[name] = payload
         end
     end
@@ -328,23 +338,139 @@ function Eink.untar(data)
     return files
 end
 
+local function looks_like_html(body)
+    if type(body) ~= "string" or body == "" then
+        return false
+    end
+    local head = body:sub(1, 256):lower()
+    return head:find("<html", 1, true) ~= nil
+        or head:find("<?xml", 1, true) ~= nil
+        or head:find("<!doctype html", 1, true) ~= nil
+end
+
+local function is_meta_name(name)
+    local base = basename(tostring(name or "")):lower()
+    return base == "info.txt" or base == "mimetype" or base == "container.xml"
+        or base == "content.opf" or base == "toc.ncx"
+end
+
+local function is_image_name(name)
+    local lower = tostring(name or ""):lower()
+    return lower:match("%.png$") or lower:match("%.jpe?g$") or lower:match("%.gif$")
+        or lower:match("%.webp$") or lower:match("%.svg$")
+end
+
+function Eink.txt_to_xhtml(text)
+    text = tostring(text or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+    if text:sub(1, 3) == "\239\187\191" then
+        text = text:sub(4)
+    end
+    local parts = {}
+    for line in (text .. "\n"):gmatch("(.-)\n") do
+        line = line:match("^(.-)%s*$") or ""
+        if line ~= "" then
+            local amp = "&" .. "amp;"
+            local lt = "&" .. "lt;"
+            local gt = "&" .. "gt;"
+            parts[#parts + 1] = "<p>" .. line:gsub("&", amp):gsub("<", lt):gsub(">", gt) .. "</p>"
+        end
+    end
+    return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+        .. "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title></title></head>\n"
+        .. "<body>\n" .. table.concat(parts, "\n") .. "\n</body></html>"
+end
+
+function Eink.to_chapter_xhtml(body)
+    if type(body) ~= "string" or body == "" or body:find("\0", 1, true) then
+        return nil
+    end
+    if looks_like_html(body) then
+        return body
+    end
+    if body:match("^%s*{") then
+        return nil
+    end
+    return Eink.txt_to_xhtml(body)
+end
+
+local function lookup_file(files, name)
+    if type(name) ~= "string" or name == "" or type(files) ~= "table" then
+        return nil
+    end
+    local candidates = {
+        name,
+        "./" .. name,
+        basename(name),
+        "Text/" .. basename(name),
+        "OEBPS/Text/" .. basename(name),
+    }
+    for _, candidate in ipairs(candidates) do
+        if files[candidate] then
+            return files[candidate], candidate
+        end
+    end
+    return nil
+end
+
+local function lookup_uid(files, uid)
+    local names = {
+        uid,
+        uid .. ".txt",
+        uid .. ".xhtml",
+        uid .. ".html",
+        "Text/" .. uid,
+        "Text/" .. uid .. ".txt",
+        "Text/" .. uid .. ".xhtml",
+        "Text/" .. uid .. ".html",
+        "OEBPS/Text/" .. uid .. ".xhtml",
+        "OEBPS/Text/" .. uid .. ".html",
+    }
+    for _, name in ipairs(names) do
+        local body, actual = lookup_file(files, name)
+        if body then
+            return body, actual
+        end
+    end
+    for name, body in pairs(files) do
+        if not is_meta_name(name) and not is_image_name(name) then
+            local stem = basename(name):gsub("%.[^.]+$", "")
+            if stem == uid then
+                return body, name
+            end
+        end
+    end
+    return nil
+end
+
+function Eink.sample_file_names(files, limit)
+    limit = tonumber(limit) or 8
+    local names = {}
+    for name in pairs(files or {}) do
+        names[#names + 1] = name
+        if #names >= limit then
+            break
+        end
+    end
+    table.sort(names)
+    return names
+end
+
 function Eink.files_to_chapter_bodies(files, chapters)
     local bodies = {}
     local assets = {}
     local src_map = {}
-    for name, data in pairs(files) do
-        local lower = name:lower()
-        if lower:match("%.png$") or lower:match("%.jpe?g$") or lower:match("%.gif$")
-            or lower:match("%.webp$") or lower:match("%.svg$") then
+    local used = {}
+    for name, data in pairs(files or {}) do
+        if is_image_name(name) then
             local href = "images/" .. basename(name)
             src_map[basename(name)] = href
             assets[#assets + 1] = {
                 href = href,
                 data = data,
-                media_type = lower:match("%.png$") and "image/png"
-                    or lower:match("%.gif$") and "image/gif"
-                    or lower:match("%.svg$") and "image/svg+xml"
-                    or lower:match("%.webp$") and "image/webp"
+                media_type = name:lower():match("%.png$") and "image/png"
+                    or name:lower():match("%.gif$") and "image/gif"
+                    or name:lower():match("%.svg$") and "image/svg+xml"
+                    or name:lower():match("%.webp$") and "image/webp"
                     or "image/jpeg",
             }
         end
@@ -354,7 +480,7 @@ function Eink.files_to_chapter_bodies(files, chapters)
             return xhtml
         end
         return xhtml:gsub("src=(['\"])(.-)%1", function(quote, src)
-            local key = basename((src:gsub("&", "&"):match("^[^%?#]+") or src))
+            local key = basename((src:match("^[^%?#]+") or src))
             local href = src_map[key]
             if href then
                 return "src=" .. quote .. href .. quote
@@ -362,26 +488,40 @@ function Eink.files_to_chapter_bodies(files, chapters)
             return "src=" .. quote .. src .. quote
         end)
     end
+    local function take(name, body)
+        if not body or used[name] then
+            return nil
+        end
+        local xhtml = Eink.to_chapter_xhtml(body)
+        if not xhtml then
+            return nil
+        end
+        used[name] = true
+        return rewrite(xhtml)
+    end
     for index, chapter in ipairs(chapters or {}) do
         local uid = tostring(chapter.chapterUid or index)
         local xhtml
         for _, file in ipairs(chapter.files or {}) do
-            local body = files[file]
-            if body and (file:lower():match("%.xhtml$") or file:lower():match("%.html$")) then
-                xhtml = rewrite(body)
+            local body, actual = lookup_file(files, file)
+            xhtml = take(actual or file, body)
+            if xhtml then
                 break
             end
         end
         if not xhtml then
+            local body, name = lookup_uid(files, uid)
+            if name then
+                xhtml = take(name, body)
+            end
+        end
+        if not xhtml then
             for name, body in pairs(files) do
-                if name:lower():match("%.xhtml$") or name:lower():match("%.html$") then
-                    -- last-resort: first leftover xhtml not yet assigned
-                    if not bodies._used then
-                        bodies._used = {}
-                    end
-                    if not bodies._used[name] then
-                        bodies._used[name] = true
-                        xhtml = rewrite(body)
+                if not used[name] and not is_meta_name(name) and not is_image_name(name)
+                    and (name:lower():match("%.xhtml$") or name:lower():match("%.html$")
+                        or name:lower():match("%.txt$")) then
+                    xhtml = take(name, body)
+                    if xhtml then
                         break
                     end
                 end
@@ -391,7 +531,6 @@ function Eink.files_to_chapter_bodies(files, chapters)
             bodies[uid] = xhtml
         end
     end
-    bodies._used = nil
     return bodies, assets
 end
 

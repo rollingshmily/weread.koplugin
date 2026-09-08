@@ -46,6 +46,37 @@ do
     assert_eq(files["Text/1.xhtml"], "<html>ok</html>", "tar xhtml")
 end
 
+do
+    local files = {
+        ["info.txt"] = [[{"chapters":[]}]],
+        ["9.txt"] = "chapter nine",
+        ["10.txt"] = "chapter ten",
+    }
+    local chapters = {
+        { chapterUid = 9, files = { "9.txt" } },
+        { chapterUid = 10 },
+    }
+    local bodies = Eink.files_to_chapter_bodies(files, chapters)
+    assert_eq(bodies["9"] and bodies["9"]:find("<p>chapter nine</p>", 1, true) and "1" or "0",
+        "1", "txt via chapter.files")
+    assert_eq(bodies["10"] and bodies["10"]:find("<p>chapter ten</p>", 1, true) and "1" or "0",
+        "1", "txt via uid")
+    assert_eq(bodies["info.txt"] and "1" or "0", "0", "info.txt is not a chapter")
+end
+
+do
+    local files = { ["1.xhtml"] = "<html>ok</html>" }
+    local chapters = { { chapterUid = 1, files = { "Text/1.xhtml" } } }
+    local bodies = Eink.files_to_chapter_bodies(files, chapters)
+    assert_eq(bodies["1"], "<html>ok</html>", "basename fallback for chapter.files")
+end
+
+do
+    local xhtml = Eink.txt_to_xhtml("a < b & c")
+    local expected = "<p>a " .. "&" .. "lt; b " .. "&" .. "amp; c</p>"
+    assert_eq(xhtml:find(expected, 1, true) and "1" or "0", "1", "txt xml escape")
+end
+
 if failures > 0 then
     os.exit(1)
 end
