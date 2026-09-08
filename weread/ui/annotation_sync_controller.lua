@@ -337,8 +337,12 @@ function M:_runAnnotationJob(context, options)
                 local key = context.store:projectionKey(context.document_key, uid)
                 context.statuses[key] = { stats = projection.stats, revision = projection.revision }
                 context.generation = (context.generation or 0) + 1
-                self:_refreshAnnotationOverlay()
-                UIManager:setDirty(self.dialog, "ui")
+                -- Rebuilding the overlay after every chapter of a 2000+ chapter
+                -- EPUB stalls the Kindle UI. Refresh live only on short jobs.
+                if #context.chapters <= 20 then
+                    self:_refreshAnnotationOverlay()
+                    UIManager:setDirty(self.dialog, "ui")
+                end
             end
         end,
     }
@@ -383,6 +387,12 @@ function M:_runAnnotationJob(context, options)
             end
             if done and pending then self:_runAnnotationJob(pending.context, pending.options) end
             return
+        end
+        if state and state.index and state.index ~= request._logged_index then
+            request._logged_index = state.index
+            logger.info("annotation_sync",
+                tostring(state.stage or ""),
+                "chapter=", tostring(state.index) .. "/" .. tostring(state.total or 0))
         end
         if request.progress then
             local title

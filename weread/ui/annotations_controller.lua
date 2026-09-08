@@ -532,27 +532,20 @@ function M:_downloadMissingThought(info, href, link, tap_started)
     end
 
     local file_path = document and document.file
-    local _current_idx, current_chapter, is_full_book =
+    local _current_idx, current_chapter =
         self:getChapterInfoFromFile(book, file_path)
-    local chapters
-    if is_full_book then
-        chapters = {}
+    -- Combined EPUBs (e.g. 2562-chapter web novels) must not rebuild every
+    -- chapter on a single tap. That path blocked the Kindle UI the same way
+    -- 1.2.27 assembled the whole book on the main thread.
+    if not current_chapter then
         for _, chapter in ipairs(catalog) do
-            if chapter.chapterUid ~= nil then
-                chapters[#chapters + 1] = chapter
+            if tostring(chapter.chapterUid) == tostring(info.chapter_uid) then
+                current_chapter = chapter
+                break
             end
         end
-    else
-        if not current_chapter then
-            for _, chapter in ipairs(catalog) do
-                if tostring(chapter.chapterUid) == tostring(info.chapter_uid) then
-                    current_chapter = chapter
-                    break
-                end
-            end
-        end
-        chapters = current_chapter and { current_chapter } or nil
     end
+    local chapters = current_chapter and { current_chapter } or nil
     if not chapters or #chapters == 0 then
         self:showInfo(_("Thought cache error. Please re-download this book with underlines and thoughts."))
         return true
@@ -568,14 +561,12 @@ function M:_downloadMissingThought(info, href, link, tap_started)
         chapters = chapters,
         chapter_index = 0,
         failed_requests = 0,
-        full_book = is_full_book,
+        full_book = false,
     }
     self._thought_refresh_request = request
     local progress_dialog
     progress_dialog = DownloadDialog:new{
-        title = is_full_book
-            and _("Local thought data is missing. Downloading full-book thoughts now…")
-            or _("Local thought data is missing. Downloading chapter thoughts now…"),
+        title = _("Local thought data is missing. Downloading chapter thoughts now…"),
         progress_max = #chapters,
         buttons = {
             {
@@ -752,6 +743,9 @@ function M:_downloadMissingThought(info, href, link, tap_started)
         end
 
         request.chapter = request.chapters[request.chapter_index]
+        logger.info("thought_repair chapter",
+            tostring(request.chapter_index) .. "/" .. tostring(#request.chapters),
+            "uid=", tostring(request.chapter.chapterUid))
         request.progress_dialog:setTitle(T(_("Downloading underlines · chapter %1/%2"),
             tostring(request.chapter_index), tostring(#request.chapters)))
         request.progress_dialog:reportProgress(request.chapter_index - 0.85)

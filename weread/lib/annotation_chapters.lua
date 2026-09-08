@@ -80,19 +80,11 @@ end
 Chapters.normalize = normalized_chapter_title
 
 function Chapters.documentEnd(document)
-    if not document.getPageCount or not document.getPageXPointer
-        or not document.getNextVisibleWordEnd then return nil end
+    if not document.getPageCount or not document.getPageXPointer then return nil end
     local ok, xp = pcall(function()
         return document:getPageXPointer(document:getPageCount())
     end)
-    if not ok or not xp then return nil end
-    local last
-    for _ = 1, 10000 do
-        local success, next_xp = pcall(document.getNextVisibleWordEnd, document, xp)
-        if not success then return nil end
-        if not next_xp or next_xp == xp then return last end
-        last, xp = next_xp, next_xp
-    end
+    if ok then return xp end
 end
 
 function Chapters.map(document, catalog, descriptor)

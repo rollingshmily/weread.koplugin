@@ -299,9 +299,19 @@ end
 -- ---------------------------------------------------------------------------
 -- Fallback search paths.
 
+local function allow_whole_book_search(document)
+    if type(document.getPageCount) ~= "function" then return true end
+    local ok, pages = pcall(document.getPageCount, document)
+    if not ok or type(pages) ~= "number" then return true end
+    -- findAllText scans the whole CRE document. On a 2000+ chapter EPUB that
+    -- freezes Kindle the same way assembling the book on the UI thread did.
+    return pages <= 80
+end
+
 -- Whole-book search.  Kept as the last resort for quotes that the chapter
 -- text cannot explain.
 local function search_all(document, quote)
+    if not allow_whole_book_search(document) then return {} end
     local ok, results = pcall(document.findAllText, document, quote, true, 0,
         ExternalAnnotations.MAX_SEARCH_HITS, false, 0)
     -- findAllText leaves its matches selected in the view; drop the marks so

@@ -54,4 +54,23 @@ expect(records[3].pos0 == "xp3" and records[3].items[1].content == "想法",
 expect(stats.total == 3 and stats.located == 3 and stats.unmatched == 0,
     "locator statistics are incorrect")
 
+local searched = false
+local large_document = {
+    getPageCount = function() return 3000 end,
+    findAllText = function()
+        searched = true
+        return { { start = "xp", ["end"] = "xpe" } }
+    end,
+}
+local large_records, large_stats = External.locate(large_document, {
+    {
+        book_id = "465030", chapter_uid = "1",
+        underlines = { { range = "1-2", markText = "hello" } },
+        reviews = {},
+    },
+})
+expect(searched == false, "large documents must not run whole-book findAllText")
+expect(#large_records == 0 and large_stats.unmatched == 1,
+    "skipped whole-book search should count as unmatched")
+
 print(("external_annotations_spec: %d checks"):format(checks))
