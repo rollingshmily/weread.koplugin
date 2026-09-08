@@ -581,6 +581,27 @@ function M:_annotationPrefetchChapters(context)
     return selected
 end
 
+function M:_annotationWindowChapters(context)
+    if not context or #context.chapters == 0 then return {} end
+    if #context.chapters <= 20 then return context.chapters end
+    local current = self:getCurrentMappedChapter()
+    if not current then return {} end
+    local window, current_uid = {}, Chapters.uid(current)
+    for index, chapter in ipairs(context.chapters) do
+        if Chapters.uid(chapter) == current_uid then
+            if context.chapters[index - 1] then
+                window[#window + 1] = context.chapters[index - 1]
+            end
+            window[#window + 1] = chapter
+            if context.chapters[index + 1] then
+                window[#window + 1] = context.chapters[index + 1]
+            end
+            break
+        end
+    end
+    return window
+end
+
 function M:maybePrefetchOpenDocumentAnnotations()
     if not self:isAnnotationPrefetchEnabled() then return false end
     if self._external_annotation_sync then return false end
@@ -625,13 +646,13 @@ function M:onUnifiedAnnotationsReady()
         and context.binding and context.binding.automatic ~= false
         and self:isNetworkConnected()
     if (enabled or prefetch) and not manual_only then
-        -- Rematch already downloaded chapters. Prefetch only current + next;
-        -- combined EPUBs must not enqueue the whole catalog.
+        -- Rematch already downloaded chapters. Combined EPUBs only touch the
+        -- current reading window; never enqueue the whole catalog.
         local cached = {}
         local seen = {}
         local sources = context.store:list(context.book_id, "source_status")
         local partials = context.store:list(context.book_id, "download")
-        for _, chapter in ipairs(context.chapters) do
+        for _, chapter in ipairs(self:_annotationWindowChapters(context)) do
             local uid = Chapters.uid(chapter)
             local source = sources[uid]
             local key = context.store:projectionKey(context.document_key, uid)

@@ -174,13 +174,19 @@ function M:onPageUpdate()
     -- Wait until paging settles. Hitting the network on every page turn
     -- flashes the Kindle status corner and can reflow the book.
     local gen = self._reader_session_gen
-    self._thought_prefetch_page_token = (self._thought_prefetch_page_token or 0) + 1
-    local token = self._thought_prefetch_page_token
-    UIManager:scheduleIn(1.5, function()
-        if token ~= self._thought_prefetch_page_token then return end
+    if self._thought_prefetch_task then
+        pcall(function() UIManager:unschedule(self._thought_prefetch_task) end)
+        self._thought_prefetch_task = nil
+    end
+    local task
+    task = function()
+        if self._thought_prefetch_task ~= task then return end
+        self._thought_prefetch_task = nil
         if gen ~= self._reader_session_gen then return end
         self:maybePrefetchOpenDocumentAnnotations()
-    end)
+    end
+    self._thought_prefetch_task = task
+    UIManager:scheduleIn(1.5, task)
 end
 
 function M:onCloseDocument()
@@ -196,7 +202,10 @@ function M:onCloseDocument()
     if self._cancelUnifiedAnnotationSync then self:_cancelUnifiedAnnotationSync() end
     self._annotation_pending_prefetch = nil
     self._annotation_prefetch_signature = nil
-    self._thought_prefetch_page_token = (self._thought_prefetch_page_token or 0) + 1
+    if self._thought_prefetch_task then
+        pcall(function() UIManager:unschedule(self._thought_prefetch_task) end)
+        self._thought_prefetch_task = nil
+    end
     self._annotation_context = nil
     self._current_weread_file = nil
     self._current_weread_book_id = nil

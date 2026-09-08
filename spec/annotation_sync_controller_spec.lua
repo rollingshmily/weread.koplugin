@@ -4,6 +4,7 @@ local scheduled, shown, notices, progress_titles, progress_updates, prevented, a
 package.preload["ui/uimanager"] = function()
     return {
         scheduleIn = function(_self, _delay, callback) scheduled[#scheduled + 1] = callback end,
+        unschedule = function() end,
         close = function() end, setDirty = function() end, show = function(_self, widget) shown[#shown + 1] = widget end,
     }
 end
@@ -178,6 +179,32 @@ assert(store:get("book", "projection", "single:2")
     "current chapter in a combined EPUB must be matched onto the open document")
 assert(not host:maybePrefetchOpenDocumentAnnotations(),
     "the same current/next window must not restart on every page")
+-- Opening a huge combined EPUB must not rematch every stored chapter.
+do
+    local queued
+    local original_run = host._runAnnotationJob
+    host._runAnnotationJob = function(self, ctx, options)
+        queued = options and options.chapters
+        return original_run(self, ctx, options)
+    end
+    context.chapters = {}
+    context.ranges = {}
+    context.statuses = {}
+    for index = 1, 40 do
+        local uid = tostring(index)
+        context.chapters[index] = { chapterUid = uid }
+        context.ranges[uid] = { start_xpointer = tostring(index) }
+        store:put("book", "source_status", uid, { revision = "1" }, uid)
+    end
+    host.ui.document.getXPointer = function() return "2" end
+    host._annotation_prefetch_signature = nil
+    store:put("book", "meta", "enabled", true)
+    host:onUnifiedAnnotationsReady()
+    assert(queued and #queued <= 3,
+        "open rematch must stay inside the current chapter window")
+    host._runAnnotationJob = original_run
+    drain()
+end
 -- Multi-select keeps source catalog order, including noncontiguous choices.
 context.chapters = { { chapterUid = "1" }, { chapterUid = "2" }, { chapterUid = "3" } }
 local picker, chosen
