@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.0-eink] (branch eink-only)
+## [2.0.0-eink] (branch Weink)
 
 ### 剥离 Web
 
