@@ -165,11 +165,13 @@ context.ranges = {
     ["3"] = { start_xpointer = "4" },
 }
 host.ui.document.getXPointer = function() return "2" end
-local before_full_book = calls
+local before_full_book, applied_before = calls, applied
 assert(host:maybePrefetchOpenDocumentAnnotations(),
     "full-book thought prefetch must run for the current mapped chapter")
 drain()
 assert(calls == before_full_book + 1, "next unread chapter thoughts were not downloaded")
+assert(applied == applied_before,
+    "background thought prefetch must not reflow the open document")
 assert(store:get("book", "source", "3"), "chapter 3 thoughts were not stored")
 assert(store:get("book", "projection", "single:2")
     or store:get("book", "status", "single:2"),

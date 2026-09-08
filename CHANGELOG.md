@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.45]
+
+### 预下载不再闪屏
+
+- 后台拉想法不再调用 `applyAnnotationVisibility`（会 setStyleSheet 整本重排）。翻页停 1.5 秒再预下载下一章。
+
+
 ## [1.2.44]
 
 ### 墨水屏登录过期

@@ -337,12 +337,15 @@ function M:_runAnnotationJob(context, options)
                 local key = context.store:projectionKey(context.document_key, uid)
                 context.statuses[key] = { stats = projection.stats, revision = projection.revision }
                 context.generation = (context.generation or 0) + 1
-                -- Rebuilding the overlay after every chapter of a 2000+ chapter
-                -- EPUB stalls the Kindle UI. Refresh live only on short jobs,
-                -- including a 1-2 chapter prefetch inside a huge combined book.
-                if #(options.chapters or context.chapters) <= 20 then
+                -- Live overlay updates are for the foreground dialog only.
+                -- Background prefetch must not setStyleSheet/setDirty: that
+                -- reflows a combined EPUB and flashes the reader.
+                if not options.background
+                    and #(options.chapters or context.chapters) <= 20 then
                     self:_refreshAnnotationOverlay()
                     UIManager:setDirty(self.dialog, "ui")
+                elseif options.background and self._xpointer_overlay then
+                    self._xpointer_overlay._annotation_window = nil
                 end
             end
         end,
@@ -374,13 +377,16 @@ function M:_runAnnotationJob(context, options)
                 if summary.chapters == #context.chapters and #context.chapters > 0 then
                     context.store:put(context.book_id, "display", context.document_key, true)
                 end
-                -- Combined EPUBs match one or two chapters at a time. Show those
-                -- results immediately; waiting for the whole book never happens.
                 if summary.chapters > 0 then
+                    local first = not self._unified_annotations_active
                     self._unified_annotations_active = true
-                    if self._xpointer_overlay then self._xpointer_overlay._annotation_window = nil end
-                    self:_refreshAnnotationOverlay()
-                    self:applyAnnotationVisibility()
+                    if self._xpointer_overlay then
+                        self._xpointer_overlay._annotation_window = nil
+                    end
+                    if not options.background then
+                        self:_refreshAnnotationOverlay()
+                        if first then self:applyAnnotationVisibility() end
+                    end
                 end
                 if not options.background then
                     self:showInfo(T(_("Matched %1/%2 underlines in %3/%4 chapters."),
