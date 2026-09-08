@@ -104,6 +104,13 @@ function M:getAccountMenuItems()
                     end),
                 },
                 {
+                    text = _("Renew cookie now"),
+                    keep_menu_open = true,
+                    callback = self:safeCallback(_("Renew cookie now"), function()
+                        self:renewCookieWithUI()
+                    end),
+                },
+                {
                     text = _("Sign out WeChat"),
                     keep_menu_open = true,
                     callback = self:safeCallback(_("Sign out WeChat"), function()
@@ -156,13 +163,6 @@ function M:getAccountMenuItems()
     return {
         web_item,
         eink_item,
-        {
-            text = _("Renew cookie now"),
-            keep_menu_open = true,
-            callback = self:safeCallback(_("Renew cookie now"), function()
-                self:renewCookieWithUI()
-            end),
-        },
         {
             text = _("Clear all logins"),
             keep_menu_open = true,
