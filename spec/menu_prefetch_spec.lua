@@ -251,6 +251,26 @@ expect(prefetch_items[2].enabled_func(),
 expect(prefetch_items[3].enabled_func(),
     "notification setting is enabled while automatic prefetch is on")
 
+host.settings.is_cookie_configured = function() return false end
+host.settings.is_eink_configured = function() return true end
+local orig_get = host.settings.get
+host.settings.get = function(self, key, default)
+    if key == "eink" then return { name = "kk" } end
+    return orig_get(self, key, default)
+end
+local account_items = host:getAccountMenuItems()
+local eink_sub
+for _, item in ipairs(account_items or {}) do
+    if item.sub_item_table_func then
+        local sub = item.sub_item_table_func()
+        if menu_has(sub, "Renew eink login now") then
+            eink_sub = sub
+            break
+        end
+    end
+end
+expect(eink_sub ~= nil, "eink submenu has a manual renew action")
+
 print(string.format(
     "menu_prefetch_spec: %d checks, %d failure(s)", checks, failures))
 os.exit(failures == 0 and 0 or 1)

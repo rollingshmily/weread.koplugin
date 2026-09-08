@@ -195,6 +195,23 @@ function M:refreshLoginMenu()
     self:refreshUI()
 end
 
+function M:renewEinkWithUI()
+    if not self.settings or not self.settings:is_eink_configured() then
+        self:showInfo(_("Eink login is missing."))
+        return
+    end
+    self:runNetworkAction(_("Renew eink login"), function()
+        if not self.client or type(self.client.eink_refresh_session) ~= "function" then
+            error(_("Eink login could not be renewed. Scan the QR code again."))
+        end
+        if not self.client:eink_refresh_session() then
+            error(_("Eink login could not be renewed. Scan the QR code again."))
+        end
+        logger.info("eink login renewed")
+        return _("Eink login renewed.")
+    end)
+end
+
 function M:renewCookieWithUI()
     if not self:requireLogin(true, false) then
         return

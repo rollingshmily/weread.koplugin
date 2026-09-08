@@ -146,6 +146,13 @@ function M:getAccountMenuItems()
                     end),
                 },
                 {
+                    text = _("Renew eink login now"),
+                    keep_menu_open = true,
+                    callback = self:safeCallback(_("Renew eink login now"), function()
+                        self:renewEinkWithUI()
+                    end),
+                },
+                {
                     text = _("Sign out eink"),
                     keep_menu_open = true,
                     callback = self:safeCallback(_("Sign out eink"), function()
