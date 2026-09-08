@@ -608,11 +608,10 @@ function Client:get_book_info(book_id)
     return self:eink_json("/book/info", { bookId = tostring(book_id) })
 end
 
-function Client:get_book_reviews(book_id, review_list_type, count)
+function Client:get_book_reviews(book_id, review_list_type, _count)
     return self:eink_json("/review/list", {
         bookId = tostring(book_id),
-        reviewListType = review_list_type or 1,
-        count = count or 20,
+        listType = review_list_type or 1,
     })
 end
 
@@ -640,7 +639,7 @@ function Client:get_read_stats(mode, base_time)
     if base_time and tonumber(base_time) and tonumber(base_time) > 0 then
         params.baseTime = tonumber(base_time)
     end
-    return self:eink_json("/book/readingStat", params)
+    return self:eink_json("/readdata/detail", params)
 end
 
 local function eink_app_error(data)
@@ -658,7 +657,7 @@ local function has_mp_rows(data)
     if type(data) ~= "table" then
         return false
     end
-    for _, key in ipairs({ "reviews", "chapters", "items", "infos", "list", "articles", "updated" }) do
+    for _, key in ipairs({ "reviews", "chapters", "items", "infos", "list", "articles", "updated", "data" }) do
         if type(data[key]) == "table" and #data[key] > 0 then
             return true
         end

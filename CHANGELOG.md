@@ -13,6 +13,7 @@
 - 公众号列表 `/mp/chapters`（空则 `/mp/list`），正文 `/review/getDocContent`，不再走 `weread.qq.com/web/mp` 或续 Cookie。
 - 书讯 `/book/info`、书评 `/review/list`、评论 `/review/single`、阅读统计 `/book/readingStat` 走 eink。
 - 进度同步、阅读时长上报、扫描本地书改认墨水屏登录，不再卡 Cookie / API Key。
+- 实锤：公众号列表读 `/mp/chapters.data`，书评用 `listType`，统计走 `/readdata/detail`。
 
 
 ## [1.2.41]

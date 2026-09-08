@@ -2119,7 +2119,7 @@ function Content.parse_mp_articles(data)
     if #articles > 0 then
         return articles
     end
-    local rows = data.chapters or data.items or data.infos or data.list or data.articles or data.updated
+    local rows = data.data or data.chapters or data.items or data.infos or data.list or data.articles or data.updated
     if type(rows) == "table" then
         for _, row in ipairs(rows) do
             push_mp_article(articles, row)
