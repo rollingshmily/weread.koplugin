@@ -87,6 +87,10 @@ do
     assert_eq(bodies["608"] and bodies["608"]:find("<p>chapter 608</p>", 1, true) and "1" or "0",
         "1", "tinyfile bookId_uid_o maps 608")
     assert_eq(Eink.payload_kind(files["465030_1330_o"]):sub(1, 5), "text:", "payload kind text")
+    local index = Eink.build_uid_index(files)
+    assert_eq(index["1330"], "465030_1330_o", "uid index 1330")
+    local one = Eink.chapter_xhtml(files, { chapterUid = 608 }, index)
+    assert_eq(one and one:find("<p>chapter 608</p>", 1, true) and "1" or "0", "1", "lazy chapter xhtml")
 end
 
 do

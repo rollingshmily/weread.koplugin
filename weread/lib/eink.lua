@@ -501,6 +501,47 @@ local function lookup_uid(files, uid)
     return nil
 end
 
+function Eink.build_uid_index(files)
+    local index = {}
+    for name in pairs(files or {}) do
+        if not is_meta_name(name) and not is_image_name(name) then
+            local uid = uid_from_name(name)
+            if uid and not index[uid] then
+                index[uid] = name
+            end
+        end
+    end
+    return index
+end
+
+function Eink.chapter_xhtml(files, chapter, uid_index)
+    if type(files) ~= "table" or type(chapter) ~= "table" then
+        return nil
+    end
+    local uid = tostring(chapter.chapterUid or "")
+    local body, name
+    for _, file in ipairs(chapter.files or {}) do
+        body, name = lookup_file(files, file)
+        if body then
+            break
+        end
+    end
+    if not body then
+        uid_index = uid_index or Eink.build_uid_index(files)
+        name = uid_index[uid]
+        if name then
+            body = files[name]
+        end
+    end
+    if not body then
+        body, name = lookup_uid(files, uid)
+    end
+    if not body then
+        return nil
+    end
+    return Eink.to_chapter_xhtml(body), name
+end
+
 function Eink.sample_file_names(files, limit)
     limit = tonumber(limit) or 8
     local names = {}

@@ -172,7 +172,9 @@ function Downloader:_dispatchAccept(dl, index, chapter, status)
         assets = assets,
         footnote_scan = status.footnote_scan,
     }
-    self:_saveCheckpoint(dl)
+    if not status.skip_save then
+        self:_saveCheckpoint(dl)
+    end
     dl.dispatch_done[index] = true
     dl.dispatch_done_count = dl.dispatch_done_count + 1
 end
@@ -284,16 +286,22 @@ function Downloader:_loadEinkBulk(dl)
         apply_chapter_files(info)
     end
     dl.eink_files = files
-    dl.eink_bodies, dl.eink_assets = Eink.files_to_chapter_bodies(files, dl.chapters)
+    dl.eink_uid_index = Eink.build_uid_index(files)
     local file_count, mapped = 0, 0
     for _name in pairs(files) do
         file_count = file_count + 1
     end
-    for _uid, body in pairs(dl.eink_bodies or {}) do
-        if type(body) == "string" and body ~= "" then
+    for _, chapter in ipairs(dl.chapters or {}) do
+        local uid = tostring(chapter.chapterUid or "")
+        if dl.eink_uid_index[uid] then
+            mapped = mapped + 1
+        elseif type(chapter.files) == "table" and chapter.files[1]
+            and files[chapter.files[1]] then
             mapped = mapped + 1
         end
     end
+    dl.eink_mapped = mapped
+    dl.eink_batch_index = 1
     logger.info("eink zip download ready", "files=", tostring(file_count),
         "mapped=", tostring(mapped), "chapters=", tostring(#(dl.chapters or {})))
     if mapped == 0 then
@@ -304,55 +312,64 @@ function Downloader:_loadEinkBulk(dl)
         end
         logger.warn("eink zip mapped 0 chapters; sample:",
             table.concat(kinds, ", "))
+        dl.eink_files = nil
+        dl.eink_uid_index = nil
+    else
+        dl.eink_flushing = true
     end
 end
 
 function Downloader:_tryEinkBulkCheckpoint(dl)
     self:_loadEinkBulk(dl)
-    if type(dl.eink_bodies) ~= "table" then
+    if not dl.eink_flushing or type(dl.eink_files) ~= "table" then
+        dl.eink_flushing = false
         return
     end
-    local book_id = dl.book and (dl.book.book_id or dl.book.bookId)
+    local batch_size = 20
     local filled = 0
-    for index, chapter in ipairs(dl.chapters or {}) do
+    local index = dl.eink_batch_index or 1
+    local total = #(dl.chapters or {})
+    while index <= total and filled < batch_size do
         if not dl.dispatch_done[index] then
+            local chapter = dl.chapters[index]
             local uid = tostring(chapter.chapterUid or index)
-            local body = dl.eink_bodies[uid]
-            if type(body) == "string" and body ~= "" then
-                local xhtml = body
-                if book_id and chapter.chapterUid then
-                    local ok_th, processed = pcall(
-                        Thoughts.apply, self.client, self.settings,
-                        book_id, chapter.chapterUid, xhtml)
-                    if ok_th and type(processed) == "string" and processed ~= "" then
-                        xhtml = processed
-                    end
-                end
-                local chapter_assets = {}
-                if type(dl.eink_assets) == "table" and not dl.eink_assets_applied then
-                    chapter_assets = dl.eink_assets
-                    dl.eink_assets_applied = true
-                end
+            local xhtml, source_name = Eink.chapter_xhtml(
+                dl.eink_files, chapter, dl.eink_uid_index)
+            if type(xhtml) == "string" and xhtml ~= "" then
                 local source_path = Checkpoint.chapter_path(dl.workspace.path, uid)
                 local ok_write, err = Checkpoint.write_chapter(source_path, xhtml)
                 if ok_write then
                     self:_dispatchAccept(dl, index, chapter, {
                         source_path = source_path,
-                        assets = chapter_assets,
+                        assets = {},
+                        skip_save = true,
                     })
                     filled = filled + 1
+                    if source_name and dl.eink_files[source_name] then
+                        dl.eink_files[source_name] = nil
+                    end
                 else
                     logger.warn("eink checkpoint write failed:",
                         uid, log_error(err))
                 end
             end
         end
+        index = index + 1
     end
+    dl.eink_batch_index = index
     if filled > 0 then
-        logger.info("eink zip checkpointed chapters:", tostring(filled))
+        self:_saveCheckpoint(dl)
+        logger.info("eink zip checkpointed chapters:", tostring(filled),
+            "through", tostring(index - 1), "/", tostring(total))
         if dl.progress_dialog then
             dl.progress_dialog:reportProgress(dl.dispatch_done_count)
         end
+    end
+    if index > total then
+        dl.eink_flushing = false
+        dl.eink_files = nil
+        dl.eink_uid_index = nil
+        logger.info("eink zip checkpoint done:", tostring(dl.dispatch_done_count))
     end
 end
 
@@ -376,7 +393,17 @@ function Downloader:_dispatchStep(dl)
                 dl.dispatch_done_count = dl.dispatch_done_count + 1
             end
         end
+        self:_loadEinkBulk(dl)
+    end
+    if dl.eink_flushing then
         self:_tryEinkBulkCheckpoint(dl)
+        self:_setStage(dl,
+            T(_("Assembling chapters %1/%2"),
+                tostring(dl.dispatch_done_count), tostring(#dl.chapters)),
+            dl.dispatch_done_count)
+        if dl.eink_flushing then
+            return self:_scheduleGuarded(dl, function() self:_step(dl) end, 0.05)
+        end
     end
 
     for index, job in pairs(dl.dispatch_active) do

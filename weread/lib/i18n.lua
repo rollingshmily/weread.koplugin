@@ -292,6 +292,7 @@ local zh = {
     ["Loading bookshelf..."] = "正在加载书架...",
     ["Downloading: %1"] = "正在下载：%1",
     ["Downloading chapter %1/%2: %3"] = "正在下载章节 %1/%2：%3",
+    ["Assembling chapters %1/%2"] = "正在组装章节 %1/%2",
     ["Downloading underlines · chapter %1/%2"] = "正在下载划线 · 章节 %1/%2",
     ["Downloading thoughts %1/%2 · chapter %3/%4"] = "正在下载想法 %1/%2 · 章节 %3/%4",
     ["Retrying thoughts %1/%2 · attempt %3"] = "正在重试想法 %1/%2 · 第 %3 次",
