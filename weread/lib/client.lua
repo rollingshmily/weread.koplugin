@@ -906,8 +906,7 @@ local function eink_body_preview(body)
     return prefix
 end
 
-function Client:eink_request(path, params, extra)
-    extra = extra or {}
+function Client:eink_request(path, params)
     local vid, token = self:eink_credentials()
     if not vid then
         error("eink credentials are missing")
@@ -926,7 +925,7 @@ function Client:eink_request(path, params, extra)
         method = "GET",
         skip_cookie = true,
         persist_response_cookies = false,
-        timeout = extra.timeout or { 30, 180 },
+        timeout = { 30, 180 },
         headers = {
             ["User-Agent"] = Eink.USER_AGENT,
             ["Accept"] = "*/*",
@@ -979,7 +978,7 @@ function Client:eink_download_zip(book_id, chapters_param)
     local body, code, headers = self:eink_request("/book/chapterdownload", {
         bookId = tostring(book_id),
         chapters = tostring(chapters_param),
-    }, { timeout = { 20, 90 } })
+    })
     if not code or code < 200 or code >= 300 then
         error("eink chapterdownload failed: HTTP " .. tostring(code or "unknown")
             .. " " .. eink_body_preview(body))

@@ -244,51 +244,19 @@ function Downloader:_loadEinkBulk(dl)
     if not self.client.can_eink_download or not self.client:can_eink_download() then
         return
     end
-    local nums = {}
-    for _, item in ipairs(dl.chapters or {}) do
-        local n = tonumber(item.chapterUid)
-        if n then
-            nums[#nums + 1] = n
+    local bulk_ok, files = pcall(function()
+        local uids = {}
+        for _, item in ipairs(dl.chapters or {}) do
+            uids[#uids + 1] = item.chapterUid
         end
-    end
-    table.sort(nums)
-    if #nums == 0 then
-        logger.warn("eink zip download skipped: no chapter uids")
-        return
-    end
-    local CHUNK = 80
-    local files = {}
-    local batches = math.ceil(#nums / CHUNK)
-    for i = 1, #nums, CHUNK do
-        local slice = {}
-        local last = math.min(i + CHUNK - 1, #nums)
-        for j = i, last do
-            slice[#slice + 1] = nums[j]
-        end
-        local batch = math.floor((i - 1) / CHUNK) + 1
-        self:_setStage(dl,
-            T(_("Downloading eink ZIP %1/%2"), tostring(batch), tostring(batches)),
-            math.floor((batch - 1) / batches * (dl.total or #nums)))
-        local bulk_ok, part = pcall(self.client.eink_download_zip, self.client,
+        return self.client:eink_download_zip(
             dl.book.book_id or dl.book.bookId,
-            Eink.build_chapters_param(slice))
-        if not bulk_ok or type(part) ~= "table" then
-            if next(files) then
-                logger.warn("eink zip batch failed, keeping partial zip:",
-                    "batch=", tostring(batch), log_error(part))
-                break
-            end
-            logger.warn("eink zip download failed, falling back to web chapters:",
-                log_error(part))
-            return
-        end
-        for name, data in pairs(part) do
-            files[name] = data
-        end
-    end
-    if not next(files) then
+            Eink.build_chapters_param(uids)
+        )
+    end)
+    if not bulk_ok or type(files) ~= "table" then
         logger.warn("eink zip download failed, falling back to web chapters:",
-            "empty files")
+            log_error(files))
         return
     end
     local info_ok, info = pcall(self.client.eink_chapterinfo, self.client,
