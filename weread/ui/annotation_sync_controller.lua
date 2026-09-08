@@ -657,8 +657,6 @@ function M:getUnifiedAnnotationMenuItems()
                     tostring(summary.chapters), tostring(#context.chapters), tostring(summary.located))
             end, text = _("Continue matching"), callback = function()
             self:startUnifiedAnnotationSync({ offline = not self:isNetworkConnected() }) end },
-        { text = _("Download thoughts for this chapter"), callback = function()
-            self:downloadCurrentChapterThoughts() end },
         { text = _("Choose chapters to match"), callback = function()
             self:chooseAnnotationChapters()
         end },
