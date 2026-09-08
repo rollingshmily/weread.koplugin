@@ -190,6 +190,35 @@ do
     expect(eink.auth_failed == true, "eink expiry is remembered")
 end
 
+do
+    local eink = {
+        vid = "1", access_token = "old",
+        refresh_token = "rt", device_id = "dev",
+    }
+    local client = make_client {
+        settings = {
+            get = function(_self, key)
+                if key == "eink" then return eink end
+            end,
+            set = function(_self, key, value)
+                if key == "eink" then eink = value end
+            end,
+            flush = function() end,
+        },
+        json_encode = function(_self, data) return data end,
+        decode_http_json = function(_self, body)
+            return type(body) == "table" and body or { accessToken = "new" }
+        end,
+        request = function()
+            return { accessToken = "new", refreshToken = "rt2" }, 200, {}
+        end,
+    }
+    expect(client:eink_refresh_session(), "refreshToken renews the eink session")
+    expect(eink.access_token == "new", "accessToken is replaced after refresh")
+    expect(eink.refresh_token == "rt2", "refreshToken is rotated when returned")
+    expect(eink.auth_failed == nil, "refresh clears the expiry flag")
+end
+
 print(string.format(
     "client_eink_thoughts_spec: %d checks, %d failure(s)", checks, failures))
 os.exit(failures == 0 and 0 or 1)

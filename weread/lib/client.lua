@@ -965,6 +965,7 @@ end
 function Client:mark_eink_auth_failed()
     if self._eink_auth_failed then return end
     self._eink_auth_failed = true
+    self._eink_refresh_exhausted = true
     local settings = self.settings
     if settings and type(settings.get) == "function" and type(settings.set) == "function" then
         local eink = settings:get("eink", {}) or {}
@@ -977,12 +978,84 @@ end
 
 function Client:can_eink_download()
     if not self:eink_credentials() then return false end
-    if self._eink_auth_failed then return false end
-    local eink = self.settings and self.settings.get and self.settings:get("eink", {}) or {}
-    if eink.auth_failed == true then
-        self._eink_auth_failed = true
+    return self._eink_refresh_exhausted ~= true
+end
+
+local function eink_login_signature(timestamp_ms, device_id, random_value)
+    local Crypto = require("weread.lib.crypto")
+    return Crypto.sha256_hex(
+        tostring(timestamp_ms) .. tostring(device_id) .. tostring(random_value)
+    )
+end
+
+function Client:eink_refresh_session()
+    if self._eink_refreshing or self._eink_refresh_exhausted then return false end
+    local settings = self.settings
+    if not settings or type(settings.get) ~= "function" then return false end
+    local eink = settings:get("eink", {}) or {}
+    local refresh = tostring(eink.refresh_token or "")
+    local device_id = tostring(eink.device_id or "")
+    if refresh == "" or device_id == "" then
+        logger.warn("eink refresh skipped: missing refresh_token or device_id")
         return false
     end
+    self._eink_refreshing = true
+    local timestamp = os.time() * 1000
+    local random_value = math.random(0, 999)
+    local ok, body, code = pcall(function()
+        return self:request({
+            url = "https://i.weread.qq.com/login",
+            method = "POST",
+            skip_cookie = true,
+            persist_response_cookies = false,
+            log_http_errors = false,
+            timeout = { 15, 25 },
+            headers = {
+                ["User-Agent"] = Eink.USER_AGENT,
+                ["Accept"] = "*/*",
+                ["Content-Type"] = "application/json;charset=UTF-8",
+                ["appver"] = Eink.APPVER,
+                ["basever"] = Eink.APPVER,
+                ["baseapi"] = "30",
+                ["osver"] = "11",
+                ["channelId"] = "900",
+                ["vid"] = tostring(eink.vid or ""),
+            },
+            body = self:json_encode({
+                refreshToken = refresh,
+                deviceId = device_id,
+                deviceName = "BOOX",
+                random = random_value,
+                signature = eink_login_signature(timestamp, device_id, random_value),
+                timestamp = timestamp,
+                deviceType = 3,
+            }),
+            diagnostic_api = "/login",
+        })
+    end)
+    self._eink_refreshing = false
+    if not ok or not code or code < 200 or code >= 300 then
+        logger.warn("eink refresh failed:", tostring(not ok and body or code))
+        return false
+    end
+    local parsed_ok, parsed = pcall(self.decode_http_json, self, body, {
+        method = "POST", url = "/login", code = code,
+    })
+    local token = parsed_ok and type(parsed) == "table" and tostring(parsed.accessToken or "") or ""
+    if token == "" then
+        logger.warn("eink refresh returned no accessToken")
+        return false
+    end
+    eink.access_token = token
+    if parsed.refreshToken and tostring(parsed.refreshToken) ~= "" then
+        eink.refresh_token = tostring(parsed.refreshToken)
+    end
+    eink.auth_failed = nil
+    eink.login_time = tostring(os.time())
+    if type(settings.set) == "function" then settings:set("eink", eink) end
+    if type(settings.flush) == "function" then settings:flush() end
+    self._eink_auth_failed = nil
+    logger.info("eink session refreshed")
     return true
 end
 
@@ -1039,6 +1112,29 @@ function Client:eink_request(path, params)
         diagnostic_api = path,
         log_http_errors = false,
     })
+    if tonumber(code) == 401 and self:eink_refresh_session() then
+        vid, token = self:eink_credentials()
+        body, code, headers = self:request({
+            url = url,
+            method = "GET",
+            skip_cookie = true,
+            persist_response_cookies = false,
+            timeout = { 30, 180 },
+            headers = {
+                ["User-Agent"] = Eink.USER_AGENT,
+                ["Accept"] = "*/*",
+                ["vid"] = vid,
+                ["accessToken"] = token,
+                ["appver"] = Eink.APPVER,
+                ["basever"] = Eink.APPVER,
+                ["baseapi"] = "30",
+                ["osver"] = "11",
+                ["channelId"] = "900",
+            },
+            diagnostic_api = path,
+            log_http_errors = false,
+        })
+    end
     if tonumber(code) == 401 then self:mark_eink_auth_failed() end
     return body, code, headers or {}
 end
@@ -1082,6 +1178,31 @@ function Client:eink_post_json(path, payload)
         diagnostic_api = path,
         log_http_errors = false,
     })
+    if tonumber(code) == 401 and self:eink_refresh_session() then
+        vid, token = self:eink_credentials()
+        body, code = self:request({
+            url = "https://i.weread.qq.com" .. path,
+            method = "POST",
+            skip_cookie = true,
+            persist_response_cookies = false,
+            timeout = { 30, 180 },
+            headers = {
+                ["User-Agent"] = Eink.USER_AGENT,
+                ["Accept"] = "*/*",
+                ["Content-Type"] = "application/json;charset=UTF-8",
+                ["vid"] = vid,
+                ["accessToken"] = token,
+                ["appver"] = Eink.APPVER,
+                ["basever"] = Eink.APPVER,
+                ["baseapi"] = "30",
+                ["osver"] = "11",
+                ["channelId"] = "900",
+            },
+            body = self:json_encode(payload or {}),
+            diagnostic_api = path,
+            log_http_errors = false,
+        })
+    end
     if tonumber(code) == 401 then self:mark_eink_auth_failed() end
     if not code or code < 200 or code >= 300 then
         error("eink POST " .. path .. " failed: HTTP " .. tostring(code or "unknown"))

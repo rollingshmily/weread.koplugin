@@ -229,7 +229,10 @@ function EinkQRLogin:_save(creds)
     local eink = self.settings:get("eink", {}) or {}
     eink.auth_failed = nil
     self.settings:set("eink", eink)
-    if self.client then self.client._eink_auth_failed = nil end
+    if self.client then
+        self.client._eink_auth_failed = nil
+        self.client._eink_refresh_exhausted = nil
+    end
     if type(self.settings.flush) == "function" then self.settings:flush() end
 end
 
