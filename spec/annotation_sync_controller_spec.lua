@@ -4,6 +4,7 @@ local scheduled, shown, notices, progress_titles, progress_updates, prevented, a
 package.preload["ui/uimanager"] = function()
     return {
         scheduleIn = function(_self, _delay, callback) scheduled[#scheduled + 1] = callback end,
+        unschedule = function() end,
         close = function() end, setDirty = function() end, show = function(_self, widget) shown[#shown + 1] = widget end,
     }
 end
@@ -154,6 +155,55 @@ host:setAnnotationPrefetchEnabled(false)
 host:prefetchChapterAnnotations({ book_id = "book" }, { chapterUid = "3" })
 drain()
 assert(calls == 2)
+-- Combined EPUBs have many chapters; prefetch must still fetch current+next.
+host:setAnnotationPrefetchEnabled(true)
+context.chapters = {
+    { chapterUid = "1" }, { chapterUid = "2" }, { chapterUid = "3" },
+}
+context.ranges = {
+    ["1"] = { start_xpointer = "0" },
+    ["2"] = { start_xpointer = "2" },
+    ["3"] = { start_xpointer = "4" },
+}
+host.ui.document.getXPointer = function() return "2" end
+local before_full_book, applied_before = calls, applied
+assert(host:maybePrefetchOpenDocumentAnnotations(),
+    "full-book thought prefetch must run for the current mapped chapter")
+drain()
+assert(calls == before_full_book + 1, "next unread chapter thoughts were not downloaded")
+assert(applied == applied_before,
+    "background thought prefetch must not reflow the open document")
+assert(store:get("book", "source", "3"), "chapter 3 thoughts were not stored")
+assert(store:get("book", "projection", "single:2")
+    or store:get("book", "status", "single:2"),
+    "current chapter in a combined EPUB must be matched onto the open document")
+assert(not host:maybePrefetchOpenDocumentAnnotations(),
+    "the same current/next window must not restart on every page")
+do
+    local queued
+    local original_run = host._runAnnotationJob
+    host._runAnnotationJob = function(self, ctx, options)
+        queued = options and options.chapters
+        return original_run(self, ctx, options)
+    end
+    context.chapters = {}
+    context.ranges = {}
+    context.statuses = {}
+    for index = 1, 40 do
+        local uid = tostring(index)
+        context.chapters[index] = { chapterUid = uid }
+        context.ranges[uid] = { start_xpointer = tostring(index) }
+        store:put("book", "source_status", uid, { revision = "1" }, uid)
+    end
+    host.ui.document.getXPointer = function() return "2" end
+    host._annotation_prefetch_signature = nil
+    store:put("book", "meta", "enabled", true)
+    host:onUnifiedAnnotationsReady()
+    assert(queued and #queued <= 3,
+        "open rematch must stay inside the current chapter window")
+    host._runAnnotationJob = original_run
+    drain()
+end
 -- Multi-select keeps source catalog order, including noncontiguous choices.
 context.chapters = { { chapterUid = "1" }, { chapterUid = "2" }, { chapterUid = "3" } }
 local picker, chosen

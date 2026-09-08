@@ -170,6 +170,21 @@ end
 
 function M:onPageUpdate()
     self.progress_sync:on_page_update()
+    if not self.maybePrefetchOpenDocumentAnnotations then return end
+    local gen = self._reader_session_gen
+    if self._thought_prefetch_task then
+        pcall(function() UIManager:unschedule(self._thought_prefetch_task) end)
+        self._thought_prefetch_task = nil
+    end
+    local task
+    task = function()
+        if self._thought_prefetch_task ~= task then return end
+        self._thought_prefetch_task = nil
+        if gen ~= self._reader_session_gen then return end
+        self:maybePrefetchOpenDocumentAnnotations()
+    end
+    self._thought_prefetch_task = task
+    UIManager:scheduleIn(1.5, task)
 end
 
 function M:onCloseDocument()
@@ -184,6 +199,11 @@ function M:onCloseDocument()
     self.downloader:cancelPrefetch("document_closed")
     if self._cancelUnifiedAnnotationSync then self:_cancelUnifiedAnnotationSync() end
     self._annotation_pending_prefetch = nil
+    self._annotation_prefetch_signature = nil
+    if self._thought_prefetch_task then
+        pcall(function() UIManager:unschedule(self._thought_prefetch_task) end)
+        self._thought_prefetch_task = nil
+    end
     self._annotation_context = nil
     self._current_weread_file = nil
     self._current_weread_book_id = nil

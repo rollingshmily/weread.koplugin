@@ -226,6 +226,14 @@ function EinkQRLogin:_save(creds)
             login_time = tostring(os.time()),
         },
     }, { replace_cookies = false })
+    local eink = self.settings:get("eink", {}) or {}
+    eink.auth_failed = nil
+    self.settings:set("eink", eink)
+    if self.client then
+        self.client._eink_auth_failed = nil
+        self.client._eink_refresh_exhausted = nil
+    end
+    if type(self.settings.flush) == "function" then self.settings:flush() end
 end
 
 function EinkQRLogin:_close_qr_dialog(programmatic)

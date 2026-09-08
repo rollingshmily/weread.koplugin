@@ -2,6 +2,14 @@
 
 ## [2.0.0-eink] (branch Weink)
 
+### 合订本想法预下载与续期（从 main 1.2.42–47 回修）
+
+- 合订 EPUB 按阅读位置预下载当前章 + 下一章想法；翻页停 1.5 秒再补。
+- 后台预下载不 `setStyleSheet`，避免整本重排闪屏。
+- 开书只重匹配上一章/当前章/下一章，不整本入队。
+- `bestbookmarks` 整本缓存一次。401 先 `refreshToken` 续期，失败才停。
+- Weink 仍不回落 web。
+
 ### 剥离 Web
 
 - 登录只走墨水屏扫码，不再要微信 Cookie / 官方 API Key。
