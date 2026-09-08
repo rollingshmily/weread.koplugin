@@ -15,6 +15,38 @@ function EpubPath.normalize_filename(name)
     return name:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
+function EpubPath.strip_paragraph_indent(line)
+    line = tostring(line or "")
+    local i = 1
+    while i <= #line do
+        local b = line:byte(i)
+        if b == 32 or b == 9 then
+            i = i + 1
+        elseif b == 0xC2 and line:byte(i + 1) == 0xA0 then
+            i = i + 2
+        elseif b == 0xE3 and line:byte(i + 1) == 0x80 and line:byte(i + 2) == 0x80 then
+            i = i + 3
+        else
+            break
+        end
+    end
+    line = line:sub(i)
+    while #line > 0 do
+        local last = line:byte(#line)
+        if last == 32 or last == 9 then
+            line = line:sub(1, -2)
+        elseif #line >= 2 and line:byte(#line - 1) == 0xC2 and last == 0xA0 then
+            line = line:sub(1, -3)
+        elseif #line >= 3 and line:byte(#line - 2) == 0xE3
+            and line:byte(#line - 1) == 0x80 and last == 0x80 then
+            line = line:sub(1, -4)
+        else
+            break
+        end
+    end
+    return line
+end
+
 function EpubPath.is_same_renamed_epub(old_path, new_path)
     if type(old_path) ~= "string" or type(new_path) ~= "string" then
         return false

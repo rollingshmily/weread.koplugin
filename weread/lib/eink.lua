@@ -3,6 +3,7 @@
 -- Existing web cookie/gateway paths stay untouched.
 
 local Aes = require("weread.lib.aes")
+local EpubPath = require("weread.lib.epub_path")
 local bit = require("bit")
 local ffi = require("ffi")
 
@@ -452,7 +453,7 @@ function Eink.txt_to_xhtml(text)
     end
     local parts = {}
     for line in (text .. "\n"):gmatch("(.-)\n") do
-        line = line:match("^(.-)%s*$") or ""
+        line = EpubPath.strip_paragraph_indent(line)
         if line ~= "" then
             local amp = "&" .. "amp;"
             local lt = "&" .. "lt;"

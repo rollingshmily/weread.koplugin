@@ -96,6 +96,10 @@ expect(xhtml:find("<p>first &amp; &lt;tag&gt;</p>", 1, true),
     "plain text was not XML-escaped")
 expect(xhtml:find("<p>second</p>", 1, true),
     "plain text paragraph conversion lost content")
+local indented = Content.txt_to_xhtml("\227\128\128段首\n   空格")
+expect(indented:find("<p>段首</p>", 1, true)
+        and indented:find("<p>空格</p>", 1, true),
+    "leading paragraph indent was not stripped")
 
 local rewritten = Content.rewrite_image_sources(
     '<img src="a.jpg"/><image xlink:href="b.png"/>',

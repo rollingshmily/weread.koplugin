@@ -1762,17 +1762,7 @@ function Content.fetch_chapter_xhtml_parallel(client, settings, book, chapter, s
 end
 
 function Content.txt_to_xhtml(text)
-    text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
-    local parts = {}
-    for line in (text .. "\n"):gmatch("(.-)\n") do
-        line = line:match("^(.-)%s*$") or ""
-        if line ~= "" then
-            table.insert(parts, "<p>" .. xml_escape(line) .. "</p>")
-        end
-    end
-    return '<?xml version="1.0" encoding="utf-8"?>\n'
-        .. '<html xmlns="http://www.w3.org/1999/xhtml"><head><title></title></head>\n'
-        .. '<body>\n' .. table.concat(parts, "\n") .. '\n</body></html>'
+    return Eink.txt_to_xhtml(text)
 end
 
 function Content.fetch_txt_as_xhtml(client, settings, book, chapter)

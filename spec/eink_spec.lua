@@ -115,6 +115,15 @@ do
     assert_eq(xhtml:find(expected, 1, true) and "1" or "0", "1", "txt xml escape")
 end
 
+do
+    local ideo = "\227\128\128\227\128\128"
+    local xhtml = Eink.txt_to_xhtml(ideo .. "少妇见此\n  hello  \n")
+    assert_eq(xhtml:find("<p>少妇见此</p>", 1, true) and "1" or "0", "1",
+        "strip ideographic indent")
+    assert_eq(xhtml:find("<p>hello</p>", 1, true) and "1" or "0", "1",
+        "strip ascii indent")
+end
+
 if failures > 0 then
     os.exit(1)
 end
