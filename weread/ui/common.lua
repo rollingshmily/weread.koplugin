@@ -238,7 +238,7 @@ end
 
 function M:confirmClearAccount()
     UIManager:show(ConfirmBox:new{
-        text = _("Clear WeRead cookie and API key? Cached books will remain."),
+        text = _("Clear all WeRead logins? Cached books will remain."),
         ok_text = _("Clear"),
         ok_callback = self:safeCallback(_("Clear"), function()
             self.qr_login:cancel()
@@ -250,6 +250,39 @@ function M:confirmClearAccount()
             end
             self:refreshLoginMenu()
             self:showInfo(_("WeRead account data cleared."))
+        end),
+    })
+end
+
+function M:confirmClearWebAccount()
+    UIManager:show(ConfirmBox:new{
+        text = _("Sign out WeChat login? Shelf and progress will need WeChat login again."),
+        ok_text = _("Sign out"),
+        ok_callback = self:safeCallback(_("Sign out"), function()
+            self.qr_login:cancel()
+            self.read_report:stop("web_signed_out")
+            self.settings:clear_web_auth()
+            if self.onWeReadAccountChanged then
+                self:onWeReadAccountChanged()
+            end
+            self:refreshLoginMenu()
+            self:showInfo(_("WeChat login signed out."))
+        end),
+    })
+end
+
+function M:confirmClearEinkAccount()
+    UIManager:show(ConfirmBox:new{
+        text = _("Sign out eink login? Full-book fast download will fall back to web."),
+        ok_text = _("Sign out"),
+        ok_callback = self:safeCallback(_("Sign out"), function()
+            if self.eink_qr_login then self.eink_qr_login:cancel() end
+            self.settings:clear_eink_auth()
+            if self.onWeReadAccountChanged then
+                self:onWeReadAccountChanged()
+            end
+            self:refreshLoginMenu()
+            self:showInfo(_("Eink login signed out."))
         end),
     })
 end

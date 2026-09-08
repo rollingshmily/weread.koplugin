@@ -484,6 +484,39 @@ function Settings:reset_account()
     self:flush()
 end
 
+function Settings:clear_web_auth()
+    self:set("api_key", "")
+    self:set("cookies", {})
+    self:set("wr_ticket", "")
+    self:set("wr_wrpa", "")
+    local account = deepcopy(self:get("account", {}) or {})
+    if account.login_method == "qr" then
+        account.login_method = self:is_eink_configured() and "eink_qr" or ""
+        if not self:is_eink_configured() then
+            account.name = ""
+            account.user_vid = ""
+            account.login_time = 0
+        end
+    end
+    self:set("account", account)
+    self:flush()
+end
+
+function Settings:clear_eink_auth()
+    self:set("eink", deepcopy(defaults.eink))
+    local account = deepcopy(self:get("account", {}) or {})
+    if account.login_method == "eink_qr" then
+        account.login_method = self:is_cookie_configured() and "qr" or ""
+        if not self:is_cookie_configured() then
+            account.name = ""
+            account.user_vid = ""
+            account.login_time = 0
+        end
+    end
+    self:set("account", account)
+    self:flush()
+end
+
 function Settings:is_cookie_configured()
     return Cookie.has_login_cookie(self:get("cookies", {})) == true
 end

@@ -64,48 +64,130 @@ function M:addToMainMenu(menu_items)
     }
 end
 
+function M:wechatLoginName()
+    local account = self.settings:get("account", {}) or {}
+    local name = type(account.name) == "string" and account.name or ""
+    if name == "" then
+        name = _("Unknown account")
+    end
+    return name
+end
+
+function M:einkLoginName()
+    local eink = self.settings:get("eink", {}) or {}
+    local label = tostring(eink.name or "")
+    if label == "" then
+        label = _("signed in")
+    end
+    return label
+end
+
+function M:getAccountMenuItems()
+    local web_item = {
+        text_func = function()
+            if self.settings:is_cookie_configured() then
+                return T(_("WeChat login · %1"), self:wechatLoginName())
+            end
+            return _("WeChat login (shelf / progress)")
+        end,
+        keep_menu_open = true,
+    }
+    if self.settings:is_cookie_configured() then
+        web_item.sub_item_table_func = function()
+            return {
+                {
+                    text = _("Scan again"),
+                    keep_menu_open = true,
+                    callback = self:safeCallback(_("QR login"), function(touchmenu_instance)
+                        self._login_menu_instance = touchmenu_instance
+                        self.qr_login:start()
+                    end),
+                },
+                {
+                    text = _("Sign out WeChat"),
+                    keep_menu_open = true,
+                    callback = self:safeCallback(_("Sign out WeChat"), function()
+                        self:confirmClearWebAccount()
+                    end),
+                },
+            }
+        end
+    else
+        web_item.callback = self:safeCallback(_("QR login"), function(touchmenu_instance)
+            self._login_menu_instance = touchmenu_instance
+            self.qr_login:start()
+        end)
+    end
+
+    local eink_item = {
+        text_func = function()
+            if self.settings:is_eink_configured() then
+                return T(_("Eink login · %1"), self:einkLoginName())
+            end
+            return _("Eink login (fast download)")
+        end,
+        keep_menu_open = true,
+    }
+    if self.settings:is_eink_configured() then
+        eink_item.sub_item_table_func = function()
+            return {
+                {
+                    text = _("Scan again"),
+                    keep_menu_open = true,
+                    callback = self:safeCallback(_("Eink QR login"), function()
+                        self.eink_qr_login:start()
+                    end),
+                },
+                {
+                    text = _("Sign out eink"),
+                    keep_menu_open = true,
+                    callback = self:safeCallback(_("Sign out eink"), function()
+                        self:confirmClearEinkAccount()
+                    end),
+                },
+            }
+        end
+    else
+        eink_item.callback = self:safeCallback(_("Eink QR login"), function()
+            self.eink_qr_login:start()
+        end)
+    end
+
+    return {
+        web_item,
+        eink_item,
+        {
+            text = _("Renew cookie now"),
+            keep_menu_open = true,
+            callback = self:safeCallback(_("Renew cookie now"), function()
+                self:renewCookieWithUI()
+            end),
+        },
+        {
+            text = _("Clear all logins"),
+            keep_menu_open = true,
+            callback = self:safeCallback(_("Clear all logins"), function()
+                self:confirmClearAccount()
+            end),
+        },
+    }
+end
+
 function M:getMainMenuItems()
     local items = {
         {
             text_func = function()
                 if self.settings:is_cookie_configured() then
-                    local account = self.settings:get("account", {})
-                    local name = type(account.name) == "string" and account.name or ""
-                    if name == "" then name = _("Unknown account") end
-                    return T(_("Logged in · %1"), name)
+                    return T(_("Account · %1"), self:wechatLoginName())
                 end
-                return _("QR code login")
-            end,
-            keep_menu_open = true,
-            callback = self:safeCallback(_("QR login"), function(touchmenu_instance)
-                self._login_menu_instance = touchmenu_instance
-                if self.settings:is_cookie_configured() then
-                    self:showAccountStatus()
-                else
-                    self.qr_login:start()
-                end
-            end),
-        },
-        {
-            text_func = function()
                 if self.settings:is_eink_configured() then
-                    local eink = self.settings:get("eink", {}) or {}
-                    local label = tostring(eink.name or "")
-                    if label == "" then
-                        label = tostring(eink.vid or "")
-                    end
-                    return T(_("Eink logged in · %1"), label)
+                    return T(_("Account · %1"), self:einkLoginName())
                 end
-                return _("Eink QR login")
+                return _("Account")
             end,
-            keep_menu_open = true,
-            callback = self:safeCallback(_("Eink QR login"), function()
-                if self.settings:is_eink_configured() then
-                    self:showAccountStatus()
-                else
-                    self.eink_qr_login:start()
-                end
-            end),
+            sub_item_table_func = function()
+                return self:getAccountMenuItems()
+            end,
         },
         {
             text = _("Bookshelf"),
@@ -746,46 +828,6 @@ function M:getSettingsMenuItems()
                                     touchmenu_instance:updateItems()
                                 end
                             end),
-                    },
-                }
-            end,
-        },
-        {
-            text = _("Account management"),
-            sub_item_table_func = function()
-                return {
-                    {
-                        text = _("Account status"),
-                        keep_menu_open = true,
-                        callback = self:safeCallback(_("Account status"), function()
-                            self:showAccountStatus()
-                        end),
-                    },
-                    {
-                        text_func = function()
-                            if self.settings:is_eink_configured() then
-                                return _("Eink QR login (replace)")
-                            end
-                            return _("Eink QR login")
-                        end,
-                        keep_menu_open = true,
-                        callback = self:safeCallback(_("Eink QR login"), function()
-                            self.eink_qr_login:start()
-                        end),
-                    },
-                    {
-                        text = _("Renew cookie now"),
-                        keep_menu_open = true,
-                        callback = self:safeCallback(_("Renew cookie now"), function()
-                            self:renewCookieWithUI()
-                        end),
-                    },
-                    {
-                        text = _("Clear account data"),
-                        keep_menu_open = true,
-                        callback = self:safeCallback(_("Clear account data"), function()
-                            self:confirmClearAccount()
-                        end),
                     },
                 }
             end,
