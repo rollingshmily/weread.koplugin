@@ -2075,32 +2075,54 @@ function Content.fetch_first_chapter(client, settings, book)
     return Content.fetch_chapter_epub(client, settings, book, chapter)
 end
 
+local function push_mp_article(articles, row)
+    if type(row) ~= "table" then
+        return
+    end
+    local review = row.review or row
+    local mp = review.mpInfo or row.mpInfo or {}
+    local review_ids = {}
+    local seen_ids = {}
+    for _, review_id in ipairs({ row.reviewId, review.reviewId, mp.originalId }) do
+        review_id = tostring(review_id or "")
+        if review_id ~= "" and not seen_ids[review_id] then
+            seen_ids[review_id] = true
+            table.insert(review_ids, review_id)
+        end
+    end
+    table.insert(articles, {
+        reviewId = review.reviewId or row.reviewId or "",
+        reviewIds = review_ids,
+        originalId = mp.originalId or "",
+        bookId = review.belongBookId or row.bookId or row.book_id or "",
+        sourceUrl = mp.content_url or mp.contentUrl or mp.source_url or mp.sourceUrl or mp.url
+            or review.content_url or review.contentUrl or review.source_url or review.sourceUrl or review.url or "",
+        title = mp.title or review.title or row.title or "",
+        pic_url = mp.pic_url or row.pic_url or "",
+        createTime = review.createTime or row.createTime or row.publishTime or 0,
+    })
+end
+
 function Content.parse_mp_articles(data)
     local articles = {}
+    data = type(data) == "table" and data or {}
     for _, group in ipairs(data.reviews or {}) do
-        for _, sub in ipairs(group.subReviews or {}) do
-            local review = sub.review or sub
-            local mp = review.mpInfo or {}
-            local review_ids = {}
-            local seen_ids = {}
-            for _, review_id in ipairs({ sub.reviewId, review.reviewId, mp.originalId }) do
-                review_id = tostring(review_id or "")
-                if review_id ~= "" and not seen_ids[review_id] then
-                    seen_ids[review_id] = true
-                    table.insert(review_ids, review_id)
-                end
+        local subs = group.subReviews
+        if type(subs) == "table" and #subs > 0 then
+            for _, sub in ipairs(subs) do
+                push_mp_article(articles, sub)
             end
-            table.insert(articles, {
-                reviewId = review.reviewId or sub.reviewId or "",
-                reviewIds = review_ids,
-                originalId = mp.originalId or "",
-                bookId = review.belongBookId or "",
-                sourceUrl = mp.content_url or mp.contentUrl or mp.source_url or mp.sourceUrl or mp.url
-                    or review.content_url or review.contentUrl or review.source_url or review.sourceUrl or review.url or "",
-                title = mp.title or "",
-                pic_url = mp.pic_url or "",
-                createTime = review.createTime or 0,
-            })
+        else
+            push_mp_article(articles, group)
+        end
+    end
+    if #articles > 0 then
+        return articles
+    end
+    local rows = data.chapters or data.items or data.infos or data.list or data.articles or data.updated
+    if type(rows) == "table" then
+        for _, row in ipairs(rows) do
+            push_mp_article(articles, row)
         end
     end
     return articles
@@ -2114,6 +2136,9 @@ function Content.extract_mp_body(html)
     end
     if not body then
         body = html:match('<div[^>]*id="js_content"[^>]*>(.*)')
+    end
+    if (not body or body == "") and (html:find("<p", 1, true) or html:find("<section", 1, true)) then
+        body = html
     end
     if not body or body == "" then
         return nil
@@ -2870,16 +2895,6 @@ function Content.fetch_mp_article_html(client, settings, book, article, opts)
     end
 
     fetch_candidates("")
-    if not html or html:match("^%s*$") then
-        logger.info("MP content empty, renewing cookie before retry")
-        local renew_ok = pcall(function()
-            return client:renew_cookie()
-        end)
-        table.insert(attempts, renew_ok and "renew:ok" or "renew:error")
-        if renew_ok then
-            fetch_candidates("renewed:", { skip_mp_auth_headers = true })
-        end
-    end
 
     local source_url = tostring(article.sourceUrl or "")
     if (not html or html:match("^%s*$")) and source_url:match("^https?://mp%.weixin%.qq%.com/") then

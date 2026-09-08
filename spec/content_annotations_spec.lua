@@ -145,4 +145,18 @@ expect(#articles == 1 and articles[1].title == "Article"
     and #articles[1].reviewIds == 3,
     "MP article metadata was not normalized")
 
+local eink_articles = Content.parse_mp_articles({
+    chapters = {{
+        reviewId = "MP_WXS_1_abc",
+        bookId = "MP_WXS_1",
+        title = "Eink Article",
+        createTime = 1,
+        mpInfo = { originalId = "abc", pic_url = "https://example/pic" },
+    }},
+})
+expect(#eink_articles == 1 and eink_articles[1].title == "Eink Article"
+    and eink_articles[1].reviewId == "MP_WXS_1_abc"
+    and eink_articles[1].bookId == "MP_WXS_1",
+    "eink MP chapter list was not normalized")
+
 print(("content_annotations_spec: %d checks"):format(checks))

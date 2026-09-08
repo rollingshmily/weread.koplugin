@@ -1027,20 +1027,9 @@ function M:fetchMPArticles(book)
         self:showBusy(_("Loading articles..."))
         local book_id = book.book_id or book.bookId
         local function request_articles()
-            local ticket = self.settings:get("wr_ticket", "")
-            if ticket == "" then ticket = nil end
-            return self.client:get_mp_articles(book_id, 0, 100, ticket)
+            return self.client:get_mp_articles(book_id, 0, 100)
         end
         local ok, result, err_code = pcall(request_articles)
-        if ok and not result and (err_code == -2041 or err_code == -2012) then
-            logger.info("MP credentials rejected; renewing before retry")
-            local renew_ok = pcall(function()
-                return self.client:renew_cookie()
-            end)
-            if renew_ok then
-                ok, result, err_code = pcall(request_articles)
-            end
-        end
         self:closeBusy()
         if not ok then
             logger.err("load MP articles failed:", log_error(result))

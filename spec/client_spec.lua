@@ -80,6 +80,9 @@ local settings = {
         if key == "cookies" then
             return { wr_skey = "XXX-cookie-value" }
         end
+        if key == "eink" then
+            return { vid = "1", access_token = "token" }
+        end
         return default
     end,
     merge_set_cookie = function(_self, value)
@@ -310,7 +313,7 @@ expect(ok_review and type(data_review) == "table"
     "review comments did not return parsed data")
 local review_request = requests[review_request_index]
 local review_url = review_request and review_request.url or ""
-expect(review_url:find("/web/review/single?", 1, true)
+expect(review_url:find("https://i.weread.qq.com/review/single?", 1, true)
     and review_url:find("reviewId=r1", 1, true)
     and review_url:find("commentsCount=60", 1, true)
     and review_url:find("commentsDirection=0", 1, true)

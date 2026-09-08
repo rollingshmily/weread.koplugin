@@ -605,12 +605,12 @@ function Client:get_shelf()
 end
 
 function Client:get_book_info(book_id)
-    return self:gateway("/book/info", { bookId = book_id })
+    return self:eink_json("/book/info", { bookId = tostring(book_id) })
 end
 
 function Client:get_book_reviews(book_id, review_list_type, count)
-    return self:gateway("/review/list", {
-        bookId = book_id,
+    return self:eink_json("/review/list", {
+        bookId = tostring(book_id),
         reviewListType = review_list_type or 1,
         count = count or 20,
     })
@@ -640,84 +640,102 @@ function Client:get_read_stats(mode, base_time)
     if base_time and tonumber(base_time) and tonumber(base_time) > 0 then
         params.baseTime = tonumber(base_time)
     end
-    return self:gateway("/readdata/detail", params)
+    return self:eink_json("/book/readingStat", params)
 end
 
-function Client:get_mp_articles(book_id, max_idx, count, wr_ticket)
-    local url = string.format(
-        "https://weread.qq.com/web/mp/articles?bookId=%s&maxIdx=%d&count=%d",
-        WeRead.urlencode(book_id),
-        max_idx or 0,
-        count or 100
-    )
-
-    local custom_headers = {
-        ["Accept"] = "application/json, text/plain, */*",
-        ["Referer"] = "https://weread.qq.com/",
-    }
-
-    if wr_ticket and wr_ticket ~= "" then
-        custom_headers["x-wr-ticket"] = wr_ticket
+local function eink_app_error(data)
+    if type(data) ~= "table" then
+        return nil
     end
-
-    local wrpa = self.settings:get("wr_wrpa", "")
-    if wrpa ~= "" then
-        custom_headers["x-wrpa-0"] = wrpa
+    local err = data.errCode or data.errcode
+    if err ~= nil and tostring(err) ~= "0" then
+        return err
     end
+    return nil
+end
 
-    local text, code, resp_headers = self:request({
-        url = url,
-        method = "GET",
-        headers = custom_headers,
-    })
-
-    if code and code >= 200 and code < 300 then
-        local data = self:decode_http_json(text, {
-            method = "GET",
-            url = url,
-            code = code,
-            headers = resp_headers,
-        })
-        if data.errCode and data.errCode ~= 0 then
-            return nil, data.errCode
+local function has_mp_rows(data)
+    if type(data) ~= "table" then
+        return false
+    end
+    for _, key in ipairs({ "reviews", "chapters", "items", "infos", "list", "articles", "updated" }) do
+        if type(data[key]) == "table" and #data[key] > 0 then
+            return true
         end
-        return data, nil
     end
-    error(http_error(self, code, text, resp_headers))
+    return false
 end
 
-function Client:get_mp_content(review_id, opts)
-    opts = opts or {}
-    local url = "https://weread.qq.com/web/mp/content?reviewId=" .. WeRead.urlencode(review_id)
-
-    local custom_headers = {
-        ["Accept"] = "text/html,application/xhtml+xml,*/*",
-        ["Referer"] = opts.referer or "https://weread.qq.com/",
+function Client:get_mp_articles(book_id, max_idx, count, _wr_ticket)
+    local params = {
+        bookId = tostring(book_id or ""),
+        maxIdx = tonumber(max_idx) or 0,
+        count = tonumber(count) or 100,
     }
-    if not opts.skip_mp_auth_headers then
-        local wr_ticket = self.settings:get("wr_ticket", "")
-        if wr_ticket ~= "" then custom_headers["x-wr-ticket"] = wr_ticket end
-
-        local wrpa = self.settings:get("wr_wrpa", "")
-        if wrpa ~= "" then custom_headers["x-wrpa-0"] = wrpa end
+    local ok, data = pcall(self.eink_json, self, "/mp/chapters", params)
+    if not ok or eink_app_error(data) or not has_mp_rows(data) then
+        local alt_ok, alt = pcall(self.eink_json, self, "/mp/list", params)
+        if alt_ok and type(alt) == "table" then
+            data = alt
+        elseif not ok then
+            error(data, 0)
+        end
     end
-
-    local text, code, resp_headers = self:request({
-        url = url,
-        method = "GET",
-        headers = custom_headers,
-        timeout = opts.timeout,
-    })
-
-    if code and code >= 200 and code < 300 then
-        return text, {
-            code = code,
-            content_type = header_value(resp_headers, "content-type"),
-            length = #(text or ""),
-            url = url,
-        }
+    local err = eink_app_error(data)
+    if err then
+        return nil, err
     end
-    error(http_error(self, code, text, resp_headers))
+    return data, nil
+end
+
+local function mp_html_from_payload(payload)
+    if type(payload) == "string" then
+        return payload
+    end
+    if type(payload) ~= "table" then
+        return nil
+    end
+    local review = type(payload.review) == "table" and payload.review or {}
+    local html = payload.htmlContent or payload.html or payload.content or payload.docContent
+        or review.htmlContent or review.html or review.content
+    if type(html) == "string" and html ~= "" then
+        return html
+    end
+    return nil
+end
+
+function Client:get_mp_content(review_id, _opts)
+    local params = { reviewId = tostring(review_id or "") }
+    local last_err
+    for _, path in ipairs({ "/review/getDocContent", "/review/single" }) do
+        local body, code, resp_headers = self:eink_request(path, params)
+        if code and code >= 200 and code < 300 then
+            local html = body
+            if type(body) == "string" and body:match("^%s*[{[]") then
+                local ok, parsed = pcall(self.decode_http_json, self, body, {
+                    method = "GET",
+                    url = path,
+                    code = code,
+                    headers = resp_headers,
+                })
+                if ok then
+                    html = mp_html_from_payload(parsed) or html
+                end
+            end
+            if type(html) == "string" and not html:match("^%s*$") then
+                return html, {
+                    code = code,
+                    content_type = header_value(resp_headers, "content-type"),
+                    length = #html,
+                    url = path,
+                }
+            end
+            last_err = path .. " empty"
+        else
+            last_err = path .. " HTTP " .. tostring(code or "unknown")
+        end
+    end
+    error("eink mp content failed: " .. tostring(last_err))
 end
 
 function Client:report_read(payload, _referer)
@@ -837,37 +855,35 @@ function Client:get_review_comments(review_id, count, opts)
     end
 
     local comments_count = count or 20
-    local url = "https://weread.qq.com/web/review/single"
-        .. "?reviewId=" .. WeRead.urlencode(review_id)
-        .. "&commentsCount=" .. tostring(comments_count)
-        .. "&commentsDirection=" .. tostring(opts.comments_direction or 0)
-        .. "&likesCount=" .. tostring(opts.likes_count or 0)
-        .. "&synckey=" .. tostring(opts.synckey or 0)
-
-    local ok, text, code, headers = pcall(function()
-        return self:get_text(url, {
-            accept = "application/json, text/plain, */*",
-            referer = opts.referer or "https://weread.qq.com/",
-            timeout = opts.timeout,
+    local ok, body, code, headers = pcall(function()
+        return self:eink_request("/review/single", {
+            reviewId = review_id,
+            commentsCount = comments_count,
+            commentsDirection = opts.comments_direction or 0,
+            likesCount = opts.likes_count or 0,
+            synckey = opts.synckey or 0,
         })
     end)
     if not ok then
-        return false, nil, tostring(text)
+        return false, nil, tostring(body)
     end
-    if not text or text == "" then
+    if not code or code < 200 or code >= 300 then
+        return false, nil, "eink /review/single failed: HTTP " .. tostring(code or "unknown")
+    end
+    if not body or body == "" then
         return false, nil, "empty response"
     end
 
     local decode_ok, parsed = pcall(function()
-        return self:decode_http_json(text, {
+        return self:decode_http_json(body, {
             method = "GET",
-            url = url,
+            url = "/review/single",
             code = code,
             headers = headers,
         })
     end)
     if not decode_ok or type(parsed) ~= "table" then
-        return false, text, "invalid JSON"
+        return false, body, "invalid JSON"
     end
     return true, parsed, nil
 end

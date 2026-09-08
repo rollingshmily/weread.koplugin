@@ -883,46 +883,9 @@ function ReadReport:_run_pipeline(book_id, opts)
         return outcome
     end
     outcome.renew_attempted = true
-
-    local renew_ok, renew_result = pcall(function()
-        return self.client:renew_cookie()
-    end)
-    if not renew_ok or not WeRead.is_success_response(renew_result) then
-        outcome.error = failure .. "; renewal=" .. (renew_ok
-            and response_summary(self.client, renew_result)
-            or tostring(renew_result))
-        outcome.error_kind = "authentication"
-        outcome.error_prefix = "read report cookie renewal failed:"
-        return outcome
-    end
-
-    local final_context_ok, final_book = pcall(function()
-        return self:ensure_context(book_id, true)
-    end)
-    if not final_context_ok then
-        outcome.error = failure .. "; final_context=" .. tostring(final_book)
-        outcome.error_kind = "context"
-        outcome.error_prefix = "read report final context refresh failed:"
-        return outcome
-    end
-    outcome.book = self:_context_snapshot(final_book)
-    local final_ok, final_result, final_code = pcall(function()
-        return self:_send(
-            book_id, final_book, opts.position, opts.elapsed_seconds)
-    end)
-    outcome.book = self:_context_snapshot(final_book)
-    local final_accepted, final_body = response_accepted(final_result, final_code)
-    if final_ok and final_accepted then
-        outcome.accepted = true
-        outcome.has_synckey = type(final_body) == "table"
-            and final_body.synckey ~= nil or false
-        return outcome
-    end
-    outcome.error = failure .. "; final=" .. (final_ok
-        and response_summary(self.client, final_result, final_code)
-        or tostring(final_result))
-    outcome.error_kind = final_ok and "server" or "transport"
-    outcome.error_prefix = "read report final retry failed:"
+    outcome.error = failure .. "; renewal=eink-only has no web cookie"
+    outcome.error_kind = "authentication"
+    outcome.error_prefix = "read report cookie renewal failed:"
     return outcome
 end
 

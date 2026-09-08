@@ -10,6 +10,8 @@
 - 书架 `/shelf/sync`、进度 `/book/getProgress`、搜索 `/store/search`、目录 `chapterinfo` 走 eink。
 - 划线走 `bookmarklist` + `bestbookmarks`，不再打 Skill gateway。
 - 想法 `/book/readreviews`、阅读上报 `/book/read` 走 eink POST。
+- 公众号列表 `/mp/chapters`（空则 `/mp/list`），正文 `/review/getDocContent`，不再走 `weread.qq.com/web/mp` 或续 Cookie。
+- 书讯 `/book/info`、书评 `/review/list`、评论 `/review/single`、阅读统计 `/book/readingStat` 走 eink。
 
 
 ## [1.2.41]
