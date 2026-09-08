@@ -757,23 +757,9 @@ function M:_downloadMissingThought(info, href, link, tap_started)
         request.progress_dialog:reportProgress(request.chapter_index - 0.85)
 
         local underlines_started = time.now()
-        local ok, underlines, err
-        if self.client.can_eink_download and self.client:can_eink_download() then
-            local ok_list, list = pcall(function()
-                return self.client:eink_bookmarklist(request.book_id)
-            end)
-            if ok_list and type(list) == "table" then
-                local Eink = require("weread.lib.eink")
-                local data = Eink.underlines_for_chapter(list.updated, request.chapter.chapterUid)
-                ok = true
-                underlines = data
-            end
-        end
-        if not ok then
-            ok, underlines, err = self.client:get_chapter_underlines(
-                request.book_id, request.chapter.chapterUid
-            )
-        end
+        local ok, underlines, err = self.client:get_chapter_underlines(
+            request.book_id, request.chapter.chapterUid
+        )
         thought_perf("thought_repair_underlines", underlines_started,
             "chapter=", tostring(request.chapter_index) .. "/" .. tostring(#request.chapters),
             "ok=", tostring(ok))
