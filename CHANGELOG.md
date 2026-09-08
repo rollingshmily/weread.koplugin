@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.25]
+
+### 墨水屏 ZIP/tar
+
+- `chapterdownload` HTTP 200 实际会返回 tar（`info.txt` 头），原先只认 ZIP `PK`，被误判失败后回退 web。
+- 识别到 tar 时直接解包，不再走 ZipCrypto。
+
+
 ## [1.2.24]
 
 ### 撤回 ZIP 分批

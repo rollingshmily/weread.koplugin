@@ -277,6 +277,57 @@ local function basename(path)
     return tostring(path or ""):match("([^/]+)$") or path
 end
 
+function Eink.is_tar(data)
+    if type(data) ~= "string" or #data < 512 then
+        return false
+    end
+    if data:sub(258, 262) == "ustar" then
+        return true
+    end
+    local name = data:sub(1, 100):match("^[%w%._/%-]+")
+    local mode = data:sub(101, 107)
+    return name ~= nil and mode:match("^0+%d+$") ~= nil
+end
+
+local function tar_octal(s)
+    s = tostring(s or ""):gsub("%z", ""):gsub(" ", "")
+    if s == "" then
+        return 0
+    end
+    return tonumber(s, 8) or 0
+end
+
+function Eink.untar(data)
+    if not Eink.is_tar(data) then
+        error("eink download is not a tar archive")
+    end
+    local files = {}
+    local off = 1
+    while off + 511 <= #data do
+        local block = data:sub(off, off + 511)
+        if block == string.rep("\0", 512) then
+            break
+        end
+        local name = block:sub(1, 100):gsub("%z.*", "")
+        local size = tar_octal(block:sub(125, 136))
+        local typeflag = block:sub(157, 157)
+        off = off + 512
+        local payload = ""
+        if size > 0 then
+            payload = data:sub(off, off + size - 1)
+            local padded = math.floor((size + 511) / 512) * 512
+            off = off + padded
+        end
+        if name ~= "" and (typeflag == "" or typeflag == "0" or typeflag == "\0") then
+            files[name] = payload
+        end
+    end
+    if not next(files) then
+        error("eink tar contained no files")
+    end
+    return files
+end
+
 function Eink.files_to_chapter_bodies(files, chapters)
     local bodies = {}
     local assets = {}

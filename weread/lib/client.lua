@@ -990,6 +990,9 @@ function Client:eink_download_zip(book_id, chapters_param)
                 .. tostring(code) .. " " .. eink_body_preview(parsed))
         end
     end
+    if type(body) == "string" and Eink.is_tar(body) then
+        return Eink.untar(body)
+    end
     if type(body) ~= "string" or body:sub(1, 2) ~= "PK" then
         error("eink chapterdownload did not return a ZIP: HTTP "
             .. tostring(code) .. " " .. eink_body_preview(body))
