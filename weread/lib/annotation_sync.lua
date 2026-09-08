@@ -84,6 +84,17 @@ function Sync:run()
             local stage = store:get(book_id, "download", uid)
             if not stage then
                 local result = self:request(function()
+                    if self.client.can_eink_download and self.client:can_eink_download() then
+                        local ok_list, list = pcall(function()
+                            return self.client:eink_bookmarklist(book_id)
+                        end)
+                        if ok_list and type(list) == "table" then
+                            local Eink = require("weread.lib.eink")
+                            local data = Eink.underlines_for_chapter(list.updated,
+                                chapter.chapterUid or chapter.chapterId or chapter.chapter_uid)
+                            return true, data
+                        end
+                    end
                     local ok, data, err = self.client:get_chapter_underlines(book_id,
                         chapter.chapterUid or chapter.chapterId or chapter.chapter_uid)
                     if ok and (type(data) ~= "table" or type(data.underlines) ~= "table") then
