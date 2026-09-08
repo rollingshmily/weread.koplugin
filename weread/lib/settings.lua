@@ -243,19 +243,14 @@ function Settings:new()
     return setmetatable(obj, self)
 end
 
+local EpubPath = require("weread.lib.epub_path")
+
 local function path_basename(path)
     return (tostring(path):match("([^/\\]+)$")) or path
 end
 
 local function path_dirname(path)
     return tostring(path):match("^(.*)[/\\][^/\\]+$") or ""
-end
-
-local function normalize_epub_filename(name)
-    name = tostring(name or ""):gsub("%.epub$", "")
-    -- Fullwidth （...） and ASCII (...).
-    name = name:gsub("\239\188\136.-\239\188\137", ""):gsub("%([^%)]-%)", "")
-    return name:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
 local function is_existing_file(path)
@@ -301,14 +296,14 @@ function Settings:find_book_id_by_path(file_path)
     end
     if is_existing_file(file_path) then
         local new_dir = path_dirname(file_path)
-        local new_name = normalize_epub_filename(path_basename(file_path))
+        local new_name = EpubPath.normalize_filename(path_basename(file_path))
         for book_id, index in pairs(indexes or {}) do
             if type(index) == "table" then
                 local stored = index.cached_full_book or index.cached_file
                 if type(stored) == "string" and stored ~= file_path
                     and path_dirname(stored) == new_dir
                     and not is_existing_file(stored)
-                    and normalize_epub_filename(path_basename(stored)) == new_name then
+                    and EpubPath.normalize_filename(path_basename(stored)) == new_name then
                     remap_stored_paths(index, stored, file_path)
                     self.store:saveSetting("books", indexes)
                     self.store:flush()

@@ -1,5 +1,6 @@
 -- KOReader event lifecycle and reader-state orchestration.
 local Content = require("weread.lib.content")
+local EpubPath = require("weread.lib.epub_path")
 local logger = require("weread.lib.logger").scoped("Prefetch")
 local UIManager = require("ui/uimanager")
 local PluginUtil = require("weread.lib.plugin_util")
@@ -462,6 +463,7 @@ function M:getFullBookCachePath(book)
     end
     local legacy = book.cached_file
     if type(legacy) ~= "string" or legacy == "" then return nil end
+    if not file_exists(legacy) then return nil end
     local mapped_count = 0
     for _uid, path in pairs(book.cached_chapters or {}) do
         if path == legacy then mapped_count = mapped_count + 1 end
@@ -496,6 +498,16 @@ function M:getChapterInfoFromFile(book, file_path)
 
     local full_book_path = self:getFullBookCachePath(book)
     if full_book_path == file_path then
+        return nil, nil, true
+    end
+
+    -- Sidecar may still hold the pre-rename path after the compact index
+    -- was remapped. Combined EPUBs must not fall through as a single chapter
+    -- with no uid, or progress sync returns current_chapter_not_found.
+    local stored = book.cached_full_book or book.cached_file
+    if mapped_count ~= 1
+        and EpubPath.is_same_renamed_epub(stored, file_path)
+        and (not stored or stored == file_path or not file_exists(stored)) then
         return nil, nil, true
     end
 
