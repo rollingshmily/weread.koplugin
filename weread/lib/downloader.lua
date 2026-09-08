@@ -246,19 +246,61 @@ function Downloader:_loadEinkBulk(dl)
     if not self.client.can_eink_download or not self.client:can_eink_download() then
         return
     end
-    local bulk_ok, files = pcall(function()
+    local bulk_ok, packed = pcall(function()
         local uids = {}
         for _, item in ipairs(dl.chapters or {}) do
             uids[#uids + 1] = item.chapterUid
         end
-        return self.client:eink_download_zip(
+        local archive = dl.workspace.path .. "/eink-archive.bin"
+        local extract = dl.workspace.path .. "/eink-extract"
+        os.execute("rm -rf " .. string.format("%q", extract))
+        os.execute("mkdir -p " .. string.format("%q", extract))
+        local _, _, headers = self.client:eink_download_to_file(
             dl.book.book_id or dl.book.bookId,
-            Eink.build_chapters_param(uids)
-        )
+            Eink.build_chapters_param(uids),
+            archive)
+        local fh = io.open(archive, "rb")
+        if not fh then
+            error("eink archive missing after download")
+        end
+        local head = fh:read(512) or ""
+        fh:close()
+        if head:sub(1, 1) == "{" then
+            local raw = Eink.read_file(archive) or head
+            error("eink chapterdownload did not return a ZIP: " .. tostring(raw):sub(1, 180))
+        end
+        if Eink.is_tar(head) then
+            local names = Eink.untar_file(archive, extract)
+            pcall(os.remove, archive)
+            return { kind = "tar", dir = extract, names = names }
+        end
+        if head:sub(1, 2) ~= "PK" then
+            error("eink chapterdownload did not return a ZIP: " .. head:gsub("[%c]+", " "):sub(1, 180))
+        end
+        local vid = self.client:eink_credentials()
+        local body = Eink.read_file(archive)
+        pcall(os.remove, archive)
+        local encrypt_key
+        for key, value in pairs(headers or {}) do
+            if type(key) == "string" and key:lower() == "encryptkey" then
+                encrypt_key = value
+                break
+            end
+        end
+        if type(encrypt_key) == "table" then
+            encrypt_key = encrypt_key[1]
+        end
+        if not encrypt_key or encrypt_key == "" then
+            error("eink chapterdownload missing encryptKey header")
+        end
+        return {
+            kind = "zip",
+            files = Eink.unzip_encrypted(body, Eink.decrypt_zip_password(encrypt_key, vid)),
+        }
     end)
-    if not bulk_ok or type(files) ~= "table" then
+    if not bulk_ok or type(packed) ~= "table" then
         logger.warn("eink zip download failed, falling back to web chapters:",
-            log_error(files))
+            log_error(packed))
         return
     end
     local function apply_chapter_files(info)
@@ -275,17 +317,31 @@ function Downloader:_loadEinkBulk(dl)
             end
         end
     end
-    local tar_info_ok, tar_info = pcall(self.client.json_decode, self.client,
-        files["info.txt"] or "")
-    if tar_info_ok then
-        apply_chapter_files(tar_info)
+    local files = packed.files
+    if packed.kind == "tar" then
+        files = {}
+        for _, name in ipairs(packed.names or {}) do
+            files[name] = true
+        end
+        dl.eink_extract_dir = packed.dir
+        local info_raw = Eink.read_file(packed.dir .. "/info.txt")
+        local tar_info_ok, tar_info = pcall(self.client.json_decode, self.client, info_raw or "")
+        if tar_info_ok then
+            apply_chapter_files(tar_info)
+        end
+    else
+        local tar_info_ok, tar_info = pcall(self.client.json_decode, self.client,
+            files["info.txt"] or "")
+        if tar_info_ok then
+            apply_chapter_files(tar_info)
+        end
+        dl.eink_files = files
     end
     local info_ok, info = pcall(self.client.eink_chapterinfo, self.client,
         dl.book.book_id or dl.book.bookId)
     if info_ok then
         apply_chapter_files(info)
     end
-    dl.eink_files = files
     dl.eink_uid_index = Eink.build_uid_index(files)
     local file_count, mapped = 0, 0
     for _name in pairs(files) do
@@ -295,25 +351,20 @@ function Downloader:_loadEinkBulk(dl)
         local uid = tostring(chapter.chapterUid or "")
         if dl.eink_uid_index[uid] then
             mapped = mapped + 1
-        elseif type(chapter.files) == "table" and chapter.files[1]
-            and files[chapter.files[1]] then
-            mapped = mapped + 1
         end
     end
     dl.eink_mapped = mapped
     dl.eink_batch_index = 1
     logger.info("eink zip download ready", "files=", tostring(file_count),
-        "mapped=", tostring(mapped), "chapters=", tostring(#(dl.chapters or {})))
+        "mapped=", tostring(mapped), "chapters=", tostring(#(dl.chapters or {})),
+        "kind=", packed.kind)
     if mapped == 0 then
         local sample = Eink.sample_file_names(files, 8)
-        local kinds = {}
-        for _, name in ipairs(sample) do
-            kinds[#kinds + 1] = name .. "=" .. Eink.payload_kind(files[name])
-        end
-        logger.warn("eink zip mapped 0 chapters; sample:",
-            table.concat(kinds, ", "))
+        logger.warn("eink zip mapped 0 chapters; sample files:",
+            table.concat(sample, ", "))
         dl.eink_files = nil
         dl.eink_uid_index = nil
+        dl.eink_extract_dir = nil
     else
         dl.eink_flushing = true
     end
@@ -321,7 +372,10 @@ end
 
 function Downloader:_tryEinkBulkCheckpoint(dl)
     self:_loadEinkBulk(dl)
-    if not dl.eink_flushing or type(dl.eink_files) ~= "table" then
+    if not dl.eink_flushing then
+        return
+    end
+    if not dl.eink_extract_dir and type(dl.eink_files) ~= "table" then
         dl.eink_flushing = false
         return
     end
@@ -333,8 +387,14 @@ function Downloader:_tryEinkBulkCheckpoint(dl)
         if not dl.dispatch_done[index] then
             local chapter = dl.chapters[index]
             local uid = tostring(chapter.chapterUid or index)
-            local xhtml, source_name = Eink.chapter_xhtml(
-                dl.eink_files, chapter, dl.eink_uid_index)
+            local xhtml, source_name
+            if dl.eink_extract_dir then
+                xhtml, source_name = Eink.chapter_xhtml_from_dir(
+                    dl.eink_extract_dir, chapter, dl.eink_uid_index)
+            else
+                xhtml, source_name = Eink.chapter_xhtml(
+                    dl.eink_files, chapter, dl.eink_uid_index)
+            end
             if type(xhtml) == "string" and xhtml ~= "" then
                 local source_path = Checkpoint.chapter_path(dl.workspace.path, uid)
                 local ok_write, err = Checkpoint.write_chapter(source_path, xhtml)
@@ -345,8 +405,11 @@ function Downloader:_tryEinkBulkCheckpoint(dl)
                         skip_save = true,
                     })
                     filled = filled + 1
-                    if source_name and dl.eink_files[source_name] then
+                    if source_name and dl.eink_files and dl.eink_files[source_name] then
                         dl.eink_files[source_name] = nil
+                    end
+                    if source_name and dl.eink_extract_dir then
+                        pcall(os.remove, dl.eink_extract_dir .. "/" .. source_name)
                     end
                 else
                     logger.warn("eink checkpoint write failed:",
@@ -369,6 +432,10 @@ function Downloader:_tryEinkBulkCheckpoint(dl)
         dl.eink_flushing = false
         dl.eink_files = nil
         dl.eink_uid_index = nil
+        if dl.eink_extract_dir then
+            os.execute("rm -rf " .. string.format("%q", dl.eink_extract_dir))
+            dl.eink_extract_dir = nil
+        end
         logger.info("eink zip checkpoint done:", tostring(dl.dispatch_done_count))
     end
 end

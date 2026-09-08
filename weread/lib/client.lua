@@ -973,6 +973,36 @@ function Client:eink_bookmarklist(book_id)
     return data
 end
 
+function Client:eink_download_to_file(book_id, chapters_param, path)
+    local vid, token = self:eink_credentials()
+    if not vid then
+        error("eink credentials are missing")
+    end
+    local query = {
+        "bookId=" .. WeRead.urlencode(tostring(book_id)),
+        "chapters=" .. WeRead.urlencode(tostring(chapters_param)),
+    }
+    table.sort(query)
+    local url = "https://i.weread.qq.com/book/chapterdownload?" .. table.concat(query, "&")
+    return self:download_to_file(url, path, {
+        skip_cookie = true,
+        persist_response_cookies = false,
+        timeout = { 30, 300 },
+        headers = {
+            ["User-Agent"] = Eink.USER_AGENT,
+            ["Accept"] = "*/*",
+            ["vid"] = vid,
+            ["accessToken"] = token,
+            ["appver"] = Eink.APPVER,
+            ["basever"] = Eink.APPVER,
+            ["baseapi"] = "30",
+            ["osver"] = "11",
+            ["channelId"] = "900",
+        },
+        diagnostic_api = "/book/chapterdownload",
+    })
+end
+
 function Client:eink_download_zip(book_id, chapters_param)
     local vid = self:eink_credentials()
     local body, code, headers = self:eink_request("/book/chapterdownload", {

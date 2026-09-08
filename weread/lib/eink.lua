@@ -338,6 +338,91 @@ function Eink.untar(data)
     return files
 end
 
+local function tar_header_fields(block)
+    local name = block:sub(1, 100):gsub("%z.*", "")
+    local size = tar_octal(block:sub(125, 136))
+    local typeflag = block:sub(157, 157)
+    local prefix = block:sub(346, 500):gsub("%z.*", "")
+    if prefix ~= "" then
+        if name == "" then
+            name = prefix
+        else
+            name = prefix .. "/" .. name
+        end
+    end
+    local regular = name ~= "" and (typeflag == "" or typeflag == "0"
+        or typeflag == "\0" or typeflag == " ")
+    return name, size, regular
+end
+
+function Eink.read_file(path)
+    if type(path) ~= "string" or path == "" then
+        return nil
+    end
+    local handle = io.open(path, "rb")
+    if not handle then
+        return nil
+    end
+    local data = handle:read("*a")
+    handle:close()
+    return data
+end
+
+function Eink.untar_file(path, out_dir)
+    local handle = io.open(path, "rb")
+    if not handle then
+        error("could not open eink tar: " .. tostring(path))
+    end
+    local names = {}
+    local zero = string.rep("\0", 512)
+    while true do
+        local block = handle:read(512)
+        if not block or #block < 512 or block == zero then
+            break
+        end
+        local name, size, regular = tar_header_fields(block)
+        local base = basename(name)
+        if regular and base ~= "" and base ~= "." and base ~= ".." then
+            local out_path = out_dir .. "/" .. base
+            local out = io.open(out_path, "wb")
+            if not out then
+                handle:close()
+                error("could not write " .. out_path)
+            end
+            local remaining = size
+            while remaining > 0 do
+                local chunk = handle:read(math.min(remaining, 65536))
+                if not chunk or chunk == "" then
+                    break
+                end
+                out:write(chunk)
+                remaining = remaining - #chunk
+            end
+            out:close()
+            names[#names + 1] = base
+            local pad = (512 - (size % 512)) % 512
+            if pad > 0 then
+                handle:read(pad)
+            end
+        elseif size > 0 then
+            local padded = math.floor((size + 511) / 512) * 512
+            local left = padded
+            while left > 0 do
+                local skip = handle:read(math.min(left, 65536))
+                if not skip or skip == "" then
+                    break
+                end
+                left = left - #skip
+            end
+        end
+    end
+    handle:close()
+    if #names == 0 then
+        error("eink tar contained no files")
+    end
+    return names
+end
+
 local function looks_like_html(body)
     if type(body) ~= "string" or body == "" then
         return false
@@ -536,6 +621,31 @@ function Eink.chapter_xhtml(files, chapter, uid_index)
     if not body then
         body, name = lookup_uid(files, uid)
     end
+    if not body then
+        return nil
+    end
+    return Eink.to_chapter_xhtml(body), name
+end
+
+function Eink.chapter_xhtml_from_dir(dir, chapter, uid_index)
+    if type(dir) ~= "string" or dir == "" or type(chapter) ~= "table" then
+        return nil
+    end
+    local uid = tostring(chapter.chapterUid or "")
+    local name = uid_index and uid_index[uid]
+    if not name then
+        for _, file in ipairs(chapter.files or {}) do
+            local base = basename(file)
+            if base ~= "" then
+                name = base
+                break
+            end
+        end
+    end
+    if not name then
+        return nil
+    end
+    local body = Eink.read_file(dir .. "/" .. name)
     if not body then
         return nil
     end

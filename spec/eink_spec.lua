@@ -44,6 +44,22 @@ do
     local files = Eink.untar(tar)
     assert_eq(files["info.txt"], [[{"chapters":[]}]], "tar info.txt")
     assert_eq(files["Text/1.xhtml"], "<html>ok</html>", "tar xhtml")
+    local tar_path = os.tmpname()
+    local out_dir = tar_path .. ".d"
+    os.execute("mkdir -p " .. string.format("%q", out_dir))
+    local tf = io.open(tar_path, "wb")
+    tf:write(tar)
+    tf:close()
+    local names = Eink.untar_file(tar_path, out_dir)
+    local extracted = Eink.read_file(out_dir .. "/1.xhtml")
+    assert_eq(extracted, "<html>ok</html>", "untar_file writes chapter to disk")
+    local has_info = "0"
+    for _, name in ipairs(names) do
+        if name == "info.txt" then has_info = "1" end
+    end
+    assert_eq(has_info, "1", "untar_file lists info.txt")
+    os.remove(tar_path)
+    os.execute("rm -rf " .. string.format("%q", out_dir))
 end
 
 do
