@@ -379,7 +379,9 @@ function Downloader:_tryEinkBulkCheckpoint(dl)
         dl.eink_flushing = false
         return
     end
-    local batch_size = 20
+    -- Disk-backed: only one chapter body is in RAM at a time. 20 was
+    -- freeze-safety when the whole tar lived in Lua strings.
+    local batch_size = 80
     local filled = 0
     local index = dl.eink_batch_index or 1
     local total = #(dl.chapters or {})
@@ -420,21 +422,30 @@ function Downloader:_tryEinkBulkCheckpoint(dl)
         index = index + 1
     end
     dl.eink_batch_index = index
-    if filled > 0 then
-        self:_saveCheckpoint(dl)
-        logger.info("eink zip checkpointed chapters:", tostring(filled),
-            "through", tostring(index - 1), "/", tostring(total))
-        if dl.progress_dialog then
-            dl.progress_dialog:reportProgress(dl.dispatch_done_count)
-        end
+    if filled > 0 and dl.progress_dialog then
+        dl.progress_dialog:reportProgress(dl.dispatch_done_count)
     end
-    if index > total then
+    dl.eink_unsaved = (dl.eink_unsaved or 0) + filled
+    local finished = index > total
+    if finished or (dl.eink_unsaved >= 200) then
+        if dl.eink_unsaved > 0 or finished then
+            self:_saveCheckpoint(dl)
+            dl.eink_unsaved = 0
+        end
+        logger.info("eink zip checkpointed chapters:",
+            tostring(dl.dispatch_done_count), "/", tostring(total))
+    end
+    if finished then
         dl.eink_flushing = false
         dl.eink_files = nil
         dl.eink_uid_index = nil
         if dl.eink_extract_dir then
             os.execute("rm -rf " .. string.format("%q", dl.eink_extract_dir))
             dl.eink_extract_dir = nil
+        end
+        -- TXT/_o chapters have no EPUB footnote images; skip the empty scan.
+        if not next(dl.footnote_scans or {}) then
+            dl.footnotes_done = true
         end
         logger.info("eink zip checkpoint done:", tostring(dl.dispatch_done_count))
     end
@@ -1326,9 +1337,14 @@ end
 
 function Downloader:_perf(dl, stage, started, ...)
     local elapsed = tonumber(time.now() - started) / 1000
+    local shown = tonumber(dl.index) or 0
+    local total = tonumber(dl.total) or 0
+    if total > 0 and shown > total then
+        shown = total
+    end
     logger.info("download_perf", "stage=", stage,
         "ms=", string.format("%.1f", elapsed),
-        "chapter=", tostring(dl.index) .. "/" .. tostring(dl.total), ...)
+        "chapter=", tostring(shown) .. "/" .. tostring(total), ...)
 end
 
 function Downloader:_failChapter(dl, err)
@@ -1732,8 +1748,12 @@ function Downloader:_step(dl)
             return
         end
         if dl.footnote_scans and not dl.footnotes_done then
-            self:_startFootnotes(dl)
-            return
+            if next(dl.footnote_scans) then
+                self:_startFootnotes(dl)
+                return
+            end
+            dl.footnotes_done = true
+            logger.info("book footnotes skipped: no scan data")
         end
         self:_setStage(dl, _("Building EPUB..."), dl.total)
         if dl.epub_build then
