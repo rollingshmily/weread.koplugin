@@ -259,9 +259,10 @@ function Downloader:_loadEinkBulk(dl)
             log_error(files))
         return
     end
-    local info_ok, info = pcall(self.client.eink_chapterinfo, self.client,
-        dl.book.book_id or dl.book.bookId)
-    if info_ok and type(info) == "table" then
+    local function apply_chapter_files(info)
+        if type(info) ~= "table" then
+            return
+        end
         local files_by_uid = {}
         for _, item in ipairs(info.chapters or {}) do
             files_by_uid[tostring(item.chapterUid)] = item.files
@@ -271,6 +272,16 @@ function Downloader:_loadEinkBulk(dl)
                 item.files = files_by_uid[tostring(item.chapterUid)]
             end
         end
+    end
+    local tar_info_ok, tar_info = pcall(self.client.json_decode, self.client,
+        files["info.txt"] or "")
+    if tar_info_ok then
+        apply_chapter_files(tar_info)
+    end
+    local info_ok, info = pcall(self.client.eink_chapterinfo, self.client,
+        dl.book.book_id or dl.book.bookId)
+    if info_ok then
+        apply_chapter_files(info)
     end
     dl.eink_files = files
     dl.eink_bodies, dl.eink_assets = Eink.files_to_chapter_bodies(files, dl.chapters)
@@ -287,8 +298,12 @@ function Downloader:_loadEinkBulk(dl)
         "mapped=", tostring(mapped), "chapters=", tostring(#(dl.chapters or {})))
     if mapped == 0 then
         local sample = Eink.sample_file_names(files, 8)
-        logger.warn("eink zip mapped 0 chapters; sample files:",
-            table.concat(sample, ", "))
+        local kinds = {}
+        for _, name in ipairs(sample) do
+            kinds[#kinds + 1] = name .. "=" .. Eink.payload_kind(files[name])
+        end
+        logger.warn("eink zip mapped 0 chapters; sample:",
+            table.concat(kinds, ", "))
     end
 end
 

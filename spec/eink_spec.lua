@@ -72,6 +72,24 @@ do
 end
 
 do
+    local files = {
+        ["info.txt"] = [[{"chapters":[]}]],
+        ["465030_1330_o"] = "chapter 1330",
+        ["465030_608_o"] = "chapter 608",
+    }
+    local chapters = {
+        { chapterUid = 1330 },
+        { chapterUid = 608 },
+    }
+    local bodies = Eink.files_to_chapter_bodies(files, chapters)
+    assert_eq(bodies["1330"] and bodies["1330"]:find("<p>chapter 1330</p>", 1, true) and "1" or "0",
+        "1", "tinyfile bookId_uid_o maps 1330")
+    assert_eq(bodies["608"] and bodies["608"]:find("<p>chapter 608</p>", 1, true) and "1" or "0",
+        "1", "tinyfile bookId_uid_o maps 608")
+    assert_eq(Eink.payload_kind(files["465030_1330_o"]):sub(1, 5), "text:", "payload kind text")
+end
+
+do
     local xhtml = Eink.txt_to_xhtml("a < b & c")
     local expected = "<p>a " .. "&" .. "lt; b " .. "&" .. "amp; c</p>"
     assert_eq(xhtml:find(expected, 1, true) and "1" or "0", "1", "txt xml escape")

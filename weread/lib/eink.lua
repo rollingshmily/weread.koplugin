@@ -380,9 +380,46 @@ function Eink.txt_to_xhtml(text)
         .. "<body>\n" .. table.concat(parts, "\n") .. "\n</body></html>"
 end
 
+function Eink.payload_kind(body)
+    if type(body) ~= "string" then
+        return type(body)
+    end
+    if body == "" then
+        return "empty"
+    end
+    local b1, b2 = body:byte(1, 2)
+    if b1 == 0x50 and b2 == 0x4b then
+        return "zip"
+    end
+    if b1 == 0x1f and b2 == 0x8b then
+        return "gzip"
+    end
+    if b1 == 0x78 then
+        return "zlib"
+    end
+    if body:find("\0", 1, true) then
+        return "binary:" .. tostring(#body)
+    end
+    if body:match("^%s*{") then
+        return "json"
+    end
+    if looks_like_html(body) then
+        return "html:" .. tostring(#body)
+    end
+    return "text:" .. tostring(#body)
+end
+
 function Eink.to_chapter_xhtml(body)
-    if type(body) ~= "string" or body == "" or body:find("\0", 1, true) then
+    if type(body) ~= "string" or body == "" then
         return nil
+    end
+    if body:find("\0", 1, true) then
+        local ok, plain = pcall(Eink.inflate_raw, body, math.max(#body * 8, 64))
+        if ok and type(plain) == "string" and plain ~= "" and not plain:find("\0", 1, true) then
+            body = plain
+        else
+            return nil
+        end
     end
     if looks_like_html(body) then
         return body
@@ -412,12 +449,35 @@ local function lookup_file(files, name)
     return nil
 end
 
+local function uid_from_name(name)
+    local base = basename(tostring(name or ""))
+    return base:match("^%d+_(%d+)_o$")
+        or base:match("^(%d+)_o$")
+        or base:match("_(%d+)_o$")
+        or (base:match("^%d+$") and base)
+        or base:gsub("%.[^.]+$", ""):match("^%d+$")
+end
+
+local function is_chapter_payload_name(name)
+    if is_meta_name(name) or is_image_name(name) then
+        return false
+    end
+    local lower = tostring(name or ""):lower()
+    if lower:match("%.xhtml$") or lower:match("%.html$") or lower:match("%.txt$") then
+        return true
+    end
+    local base = basename(name)
+    return base:match("_o$") ~= nil or base:match("^%d+$") ~= nil
+end
+
 local function lookup_uid(files, uid)
+    uid = tostring(uid or "")
     local names = {
         uid,
         uid .. ".txt",
         uid .. ".xhtml",
         uid .. ".html",
+        uid .. "_o",
         "Text/" .. uid,
         "Text/" .. uid .. ".txt",
         "Text/" .. uid .. ".xhtml",
@@ -433,8 +493,7 @@ local function lookup_uid(files, uid)
     end
     for name, body in pairs(files) do
         if not is_meta_name(name) and not is_image_name(name) then
-            local stem = basename(name):gsub("%.[^.]+$", "")
-            if stem == uid then
+            if uid_from_name(name) == uid then
                 return body, name
             end
         end
@@ -517,9 +576,7 @@ function Eink.files_to_chapter_bodies(files, chapters)
         end
         if not xhtml then
             for name, body in pairs(files) do
-                if not used[name] and not is_meta_name(name) and not is_image_name(name)
-                    and (name:lower():match("%.xhtml$") or name:lower():match("%.html$")
-                        or name:lower():match("%.txt$")) then
+                if not used[name] and is_chapter_payload_name(name) then
                     xhtml = take(name, body)
                     if xhtml then
                         break

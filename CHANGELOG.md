@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.27]
+
+### 墨水屏 TXT TinyFile 映射
+
+- 真机日志：`files=2563 mapped=0`，样本名 `465030_1330_o`。
+- 按 `{bookId}_{chapterUid}_o` 映射章节；纯文本包 xhtml。
+- 优先读 tar 内 `info.txt` 的 files 列表。
+- mapped=0 时日志带 payload 类型（text/html/gzip/binary），不再只打文件名。
+
+
 ## [1.2.26]
 
 ### 墨水屏 tar 章节映射
