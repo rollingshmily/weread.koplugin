@@ -30,19 +30,6 @@ function Thoughts.fetch_underlines(client, settings, book_id, chapter_uid, force
     if force_enabled ~= true and not Thoughts.is_download_enabled(settings) then
         return true, nil, {}
     end
-    if client.can_eink_download and client:can_eink_download() then
-        local ok_list, list = pcall(function()
-            return client:eink_bookmarklist(book_id)
-        end)
-        if ok_list and type(list) == "table" then
-            local Eink = require("weread.lib.eink")
-            local data = Eink.underlines_for_chapter(list.updated, chapter_uid)
-            return true, data, Thoughts.collect_ranges(data)
-        end
-    end
-    if not settings:is_cookie_configured() then
-        return false, nil, {}, "cookie not configured"
-    end
     local ok, data, err = client:get_chapter_underlines(book_id, chapter_uid)
     if not ok or type(data) ~= "table" then
         return false, nil, {}, err or "no underline data"

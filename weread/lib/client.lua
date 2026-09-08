@@ -4,6 +4,7 @@ local socketutil = require("socketutil")
 local http = require("socket.http")
 local Cookie = require("weread.lib.cookie")
 local WeRead = require("weread.lib.protocol")
+local Eink = require("weread.lib.eink")
 
 local ok_json, json = pcall(require, "json")
 if not ok_json then
@@ -736,14 +737,25 @@ function Client:report_read(payload, referer)
     })
 end
 
-function Client:get_chapter_underlines(book_id, chapter_uid)
-    if not book_id or tostring(book_id) == "" then
-        return false, nil, "empty book_id"
-    end
-    if not chapter_uid then
-        return false, nil, "empty chapter_uid"
-    end
+local function eink_payload_error(data)
+    if type(data) ~= "table" then return nil end
+    local err = data.errCode or data.errcode
+    if err ~= nil and tostring(err) ~= "0" then return err end
+    return nil
+end
 
+local function merge_chapter_underlines(rows, seen, items, chapter_uid)
+    local data = Eink.underlines_for_chapter(items, chapter_uid)
+    for _, row in ipairs(data.underlines or {}) do
+        local key = tostring(row.range or "")
+        if key ~= "" and not seen[key] then
+            seen[key] = true
+            rows[#rows + 1] = row
+        end
+    end
+end
+
+function Client:_web_chapter_underlines(book_id, chapter_uid)
     local ok, result = pcall(function()
         return self:gateway("/book/underlines", {
             bookId = tostring(book_id),
@@ -757,6 +769,51 @@ function Client:get_chapter_underlines(book_id, chapter_uid)
         return false, nil, "underlines: gateway returned non-table"
     end
     return true, result
+end
+
+function Client:get_chapter_underlines(book_id, chapter_uid)
+    if not book_id or tostring(book_id) == "" then
+        return false, nil, "empty book_id"
+    end
+    if not chapter_uid then
+        return false, nil, "empty chapter_uid"
+    end
+
+    local own_items
+    if self:can_eink_download() then
+        local ok_own, own = pcall(function()
+            return self:eink_bookmarklist(book_id)
+        end)
+        if ok_own and type(own) == "table" and not eink_payload_error(own) then
+            own_items = own.updated
+        end
+        local ok_best, best = pcall(function()
+            return self:eink_bestbookmarks(book_id)
+        end)
+        if ok_best and type(best) == "table" and not eink_payload_error(best) then
+            local rows, seen = {}, {}
+            merge_chapter_underlines(rows, seen,
+                best.updated or best.bookmarks or best.items, chapter_uid)
+            merge_chapter_underlines(rows, seen, own_items, chapter_uid)
+            logger.info("chapter underlines via eink",
+                "book=", tostring(book_id), "chapter=", tostring(chapter_uid),
+                "count=", tostring(#rows))
+            return true, { chapterUid = chapter_uid, underlines = rows }
+        end
+        logger.warn("eink bestbookmarks failed, falling back to web:",
+            tostring(not ok_best and best or eink_payload_error(best) or "invalid"))
+    end
+
+    local ok, result, err = self:_web_chapter_underlines(book_id, chapter_uid)
+    if ok and own_items then
+        result.underlines = result.underlines or {}
+        local seen = {}
+        for _, row in ipairs(result.underlines) do
+            seen[tostring(row.range or "")] = true
+        end
+        merge_chapter_underlines(result.underlines, seen, own_items, chapter_uid)
+    end
+    return ok, result, err
 end
 
 function Client:build_chapter_review_batches(ranges)
@@ -786,6 +843,25 @@ function Client:get_chapter_reviews_batch(book_id, chapter_uid, batch)
     end
     if type(batch) ~= "table" or #batch == 0 then
         return true, { reviews = {} }
+    end
+
+    if self:can_eink_download() then
+        local ok, result = pcall(function()
+            return self:eink_post_json("/book/readreviews", {
+                bookId = tostring(book_id),
+                chapterUid = chapter_uid,
+                reviews = batch,
+            })
+        end)
+        if ok and type(result) == "table" and type(result.reviews) == "table"
+            and not eink_payload_error(result) then
+            logger.info("chapter thoughts via eink",
+                "book=", tostring(book_id), "chapter=", tostring(chapter_uid),
+                "reviews=", tostring(#result.reviews))
+            return true, result
+        end
+        logger.warn("eink readreviews failed, falling back to web:",
+            tostring(not ok and result or eink_payload_error(result) or "invalid"))
     end
 
     local ok, result = pcall(function()
@@ -871,8 +947,6 @@ function Client:get_review_comments(review_id, count, opts)
     return true, parsed, nil
 end
 
-local Eink = require("weread.lib.eink")
-
 function Client:eink_credentials()
     local eink = self.settings:get("eink", {}) or {}
     local vid = tostring(eink.vid or "")
@@ -942,6 +1016,54 @@ function Client:eink_request(path, params)
     return body, code, headers or {}
 end
 
+function Client:eink_json(path, params)
+    local body, code = self:eink_request(path, params)
+    if not code or code < 200 or code >= 300 then
+        error("eink " .. path .. " failed: HTTP " .. tostring(code or "unknown"))
+    end
+    return self:decode_http_json(body, {
+        method = "GET",
+        url = path,
+        code = code,
+    }), code
+end
+
+function Client:eink_post_json(path, payload)
+    local vid, token = self:eink_credentials()
+    if not vid then
+        error("eink credentials are missing")
+    end
+    local body, code = self:request({
+        url = "https://i.weread.qq.com" .. path,
+        method = "POST",
+        skip_cookie = true,
+        persist_response_cookies = false,
+        timeout = { 30, 180 },
+        headers = {
+            ["User-Agent"] = Eink.USER_AGENT,
+            ["Accept"] = "*/*",
+            ["Content-Type"] = "application/json;charset=UTF-8",
+            ["vid"] = vid,
+            ["accessToken"] = token,
+            ["appver"] = Eink.APPVER,
+            ["basever"] = Eink.APPVER,
+            ["baseapi"] = "30",
+            ["osver"] = "11",
+            ["channelId"] = "900",
+        },
+        body = self:json_encode(payload or {}),
+        diagnostic_api = path,
+    })
+    if not code or code < 200 or code >= 300 then
+        error("eink POST " .. path .. " failed: HTTP " .. tostring(code or "unknown"))
+    end
+    return self:decode_http_json(body, {
+        method = "POST",
+        url = path,
+        code = code,
+    })
+end
+
 function Client:eink_chapterinfo(book_id)
     local body, code = self:eink_request("/book/chapterinfo", { bookId = tostring(book_id) })
     if not code or code < 200 or code >= 300 then
@@ -952,6 +1074,21 @@ function Client:eink_chapterinfo(book_id)
         url = "/book/chapterinfo",
         code = code,
     })
+end
+
+function Client:eink_bestbookmarks(book_id)
+    book_id = tostring(book_id or "")
+    self._eink_bestbookmarks_cache = self._eink_bestbookmarks_cache or {}
+    if self._eink_bestbookmarks_cache[book_id] then
+        return self._eink_bestbookmarks_cache[book_id]
+    end
+    local data = self:eink_json("/book/bestbookmarks", { bookId = book_id })
+    local err = eink_payload_error(data)
+    if err then
+        error("eink bestbookmarks errCode=" .. tostring(err))
+    end
+    self._eink_bestbookmarks_cache[book_id] = data
+    return data
 end
 
 function Client:eink_bookmarklist(book_id)
