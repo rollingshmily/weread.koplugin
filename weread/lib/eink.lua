@@ -750,33 +750,42 @@ end
 -- bestbookmarks may include an empty `updated` list plus the real marks in
 -- `items` or `chapters[].bookmarks`. Empty tables are truthy, so callers must
 -- not do `payload.updated or payload.items`.
-function Eink.collect_bookmark_items(payload)
+function Eink.collect_bookmark_items(payload, default_chapter_uid)
     local items, seen = {}, {}
-    local function add_item(item)
+    local function add_item(item, uid)
         if not bookmark_has_range(item) then return end
-        local key = tostring(item.chapterUid or "") .. ":" .. tostring(item.range)
+        local chapter_uid = item.chapterUid or uid or default_chapter_uid
+        local key = tostring(chapter_uid or "") .. ":" .. tostring(item.range)
         if seen[key] then return end
         seen[key] = true
-        items[#items + 1] = item
+        items[#items + 1] = {
+            range = item.range,
+            markText = item.markText,
+            chapterUid = chapter_uid,
+            style = item.style,
+            type = item.type,
+            bookmarkId = item.bookmarkId,
+        }
     end
-    local function add_list(list)
+    local function add_list(list, uid)
         if type(list) ~= "table" then return end
         for _, item in ipairs(list) do
             if bookmark_has_range(item) then
-                add_item(item)
+                add_item(item, uid)
             elseif type(item) == "table" then
-                add_list(item.bookmarks or item.items or item.marks or item.updated)
+                add_list(item.bookmarks or item.items or item.marks or item.updated,
+                    item.chapterUid or uid)
             end
         end
     end
     if type(payload) ~= "table" then return items end
-    add_list(payload.items)
-    add_list(payload.bookmarks)
-    add_list(payload.marks)
-    add_list(payload.chapters)
-    add_list(payload.chapterBestBookmarks)
+    add_list(payload.items, default_chapter_uid)
+    add_list(payload.bookmarks, default_chapter_uid)
+    add_list(payload.marks, default_chapter_uid)
+    add_list(payload.chapters, default_chapter_uid)
+    add_list(payload.chapterBestBookmarks, default_chapter_uid)
     if bookmark_has_range((payload.updated or {})[1]) then
-        add_list(payload.updated)
+        add_list(payload.updated, default_chapter_uid)
     end
     return items
 end

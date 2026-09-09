@@ -773,6 +773,13 @@ function Client:_web_chapter_underlines(book_id, chapter_uid)
     return true, result
 end
 
+local function merge_own_and_popular(popular, own_items, chapter_uid)
+    local rows, seen = {}, {}
+    merge_chapter_underlines(rows, seen, popular, chapter_uid)
+    merge_chapter_underlines(rows, seen, own_items, chapter_uid)
+    return rows
+end
+
 function Client:get_chapter_underlines(book_id, chapter_uid)
     if not book_id or tostring(book_id) == "" then
         return false, nil, "empty book_id"
@@ -795,25 +802,37 @@ function Client:get_chapter_underlines(book_id, chapter_uid)
                 return self:eink_bestbookmarks(book_id)
             end)
         end
+        local popular = {}
         if ok_best and type(best) == "table" and not eink_payload_error(best) then
-            local popular = Eink.collect_bookmark_items(best)
-            if #popular > 0 then
-                local rows, seen = {}, {}
-                merge_chapter_underlines(rows, seen, popular, chapter_uid)
-                merge_chapter_underlines(rows, seen, own_items, chapter_uid)
-                logger.info("chapter underlines via eink",
-                    "book=", tostring(book_id), "chapter=", tostring(chapter_uid),
-                    "count=", tostring(#rows), "popular=", tostring(#popular))
-                return true, { chapterUid = chapter_uid, underlines = rows }
-            end
-            local keys = {}
-            for key in pairs(best) do keys[#keys + 1] = tostring(key) end
-            table.sort(keys)
-            logger.warn("eink bestbookmarks had no bookmark ranges, falling back to web:",
-                "keys=", table.concat(keys, ","))
-        else
-            logger.warn("eink bestbookmarks failed, falling back to web:",
+            popular = Eink.collect_bookmark_items(best)
+        elseif self:can_eink_download() then
+            logger.warn("eink bestbookmarks failed, falling back to chapter/web:",
                 tostring(not ok_best and best or eink_payload_error(best) or "invalid"))
+        end
+        local rows = merge_own_and_popular(popular, own_items, chapter_uid)
+        if #rows == 0 and self:can_eink_download() then
+            local ok_chapter, chapter_best = pcall(function()
+                return self:eink_bestbookmarks(book_id, chapter_uid)
+            end)
+            if ok_chapter and type(chapter_best) == "table"
+                and not eink_payload_error(chapter_best) then
+                popular = Eink.collect_bookmark_items(chapter_best, chapter_uid)
+                rows = merge_own_and_popular(popular, own_items, chapter_uid)
+            else
+                logger.warn("eink bestbookmarks chapter fetch failed:",
+                    tostring(not ok_chapter and chapter_best
+                        or eink_payload_error(chapter_best) or "invalid"))
+            end
+        end
+        if #rows > 0 then
+            logger.info("chapter underlines via eink",
+                "book=", tostring(book_id), "chapter=", tostring(chapter_uid),
+                "count=", tostring(#rows), "popular=", tostring(#popular))
+            return true, { chapterUid = chapter_uid, underlines = rows }
+        end
+        if #popular > 0 then
+            logger.warn("eink bestbookmarks missed chapter, falling back to web:",
+                "chapter=", tostring(chapter_uid), "popular=", tostring(#popular))
         end
     end
 
@@ -1234,21 +1253,24 @@ function Client:eink_chapterinfo(book_id)
     })
 end
 
-function Client:eink_bestbookmarks(book_id)
+function Client:eink_bestbookmarks(book_id, chapter_uid)
     book_id = tostring(book_id or "")
-    self._eink_bestbookmarks_cache = self._eink_bestbookmarks_cache or {}
-    if self._eink_bestbookmarks_cache[book_id] then
-        return self._eink_bestbookmarks_cache[book_id]
+    local params = { bookId = book_id, chapterUid = 0 }
+    local cache_key = book_id
+    if chapter_uid ~= nil and tostring(chapter_uid) ~= "" and tostring(chapter_uid) ~= "0" then
+        params.chapterUid = chapter_uid
+        cache_key = book_id .. ":" .. tostring(chapter_uid)
     end
-    local data = self:eink_json("/book/bestbookmarks", {
-        bookId = book_id,
-        chapterUid = 0,
-    })
+    self._eink_bestbookmarks_cache = self._eink_bestbookmarks_cache or {}
+    if self._eink_bestbookmarks_cache[cache_key] then
+        return self._eink_bestbookmarks_cache[cache_key]
+    end
+    local data = self:eink_json("/book/bestbookmarks", params)
     local err = eink_payload_error(data)
     if err then
         error("eink bestbookmarks errCode=" .. tostring(err))
     end
-    self._eink_bestbookmarks_cache[book_id] = data
+    self._eink_bestbookmarks_cache[cache_key] = data
     return data
 end
 

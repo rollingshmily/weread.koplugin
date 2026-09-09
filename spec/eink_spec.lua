@@ -51,6 +51,18 @@ do
     assert_eq(#collected, 2, "collect ignores empty updated and flattens items/chapters")
     assert_eq(collected[1].range, "1-2", "items come first")
     assert_eq(collected[2].range, "9-10", "chapter bookmarks are flattened")
+    local inherited = Eink.collect_bookmark_items({
+        chapters = {
+            { chapterUid = 8, bookmarks = { { range = "4-5", markText = "x" } } },
+        },
+    })
+    assert_eq(tostring(inherited[1].chapterUid), "8",
+        "nested bookmarks inherit the parent chapterUid")
+    local stamped = Eink.collect_bookmark_items({
+        items = { { range = "6-7", markText = "y" } },
+    }, 1316)
+    assert_eq(tostring(stamped[1].chapterUid), "1316",
+        "per-chapter payloads stamp the requested chapterUid")
     assert_eq(#Eink.collect_bookmark_items({ updated = {} }), 0,
         "empty payload has no bookmark ranges")
 end

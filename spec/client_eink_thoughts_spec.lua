@@ -109,7 +109,7 @@ do
             return {
                 chapters = {
                     { chapterUid = 1, bookmarks = {
-                        { chapterUid = 1, range = "11-12", markText = "nested" },
+                        { range = "11-12", markText = "nested" },
                     } },
                 },
             }
@@ -145,8 +145,8 @@ do
     local ok, data = client:get_chapter_underlines("book", 1)
     expect(ok and data.underlines[1].range == "5-6",
         "empty popular list falls back to web underlines")
-    expect(table.concat(calls, ",") == "own,best,/book/underlines",
-        "web underlines run when eink popular list is empty")
+    expect(table.concat(calls, ",") == "own,best,best,/book/underlines",
+        "web underlines run when book and chapter popular lists are empty")
 end
 
 do
@@ -169,8 +169,40 @@ do
     local ok, data = client:get_chapter_underlines("book", 1)
     expect(ok and data.underlines[1].range == "5-6",
         "bestbookmarks failure falls back to web underlines")
-    expect(table.concat(calls, ",") == "own,best,/book/underlines",
-        "web underlines run only after eink popular list fails")
+    expect(table.concat(calls, ",") == "own,best,best,/book/underlines",
+        "web underlines run only after book and chapter eink lists fail")
+end
+
+do
+    local calls = {}
+    local client = make_client {
+        can_eink_download = function() return true end,
+        eink_bookmarklist = function()
+            calls[#calls + 1] = "own"
+            return { updated = {} }
+        end,
+        eink_bestbookmarks = function(_self, _book_id, chapter_uid)
+            if chapter_uid then
+                calls[#calls + 1] = "chapter"
+                return { items = {
+                    { range = "20-21", markText = "chapter-best" },
+                } }
+            end
+            calls[#calls + 1] = "book"
+            return { items = {
+                { chapterUid = 9, range = "1-2", markText = "other" },
+            } }
+        end,
+        gateway = function()
+            calls[#calls + 1] = "web"
+            error("chapter bestbookmarks should supply this chapter")
+        end,
+    }
+    local ok, data = client:get_chapter_underlines("book", 1316)
+    expect(ok and data.underlines[1].range == "20-21",
+        "chapterUid miss in the book list fetches that chapter")
+    expect(table.concat(calls, ",") == "own,book,chapter",
+        "per-chapter bestbookmarks skip web when they have ranges")
 end
 
 do
