@@ -779,6 +779,7 @@ function Eink.collect_bookmark_items(payload, default_chapter_uid)
         end
     end
     if type(payload) ~= "table" then return items end
+    add_list(payload.underlines, default_chapter_uid)
     add_list(payload.items, default_chapter_uid)
     add_list(payload.bookmarks, default_chapter_uid)
     add_list(payload.marks, default_chapter_uid)

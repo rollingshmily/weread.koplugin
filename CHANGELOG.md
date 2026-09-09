@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.51]
+
+### 想法改拉本章全部划线
+
+- 下载/预下载想法不再走 `/book/bestbookmarks`（全书热门截断列表）。改走本章 `/book/underlines` 热力图，再合并自己的 `bookmarklist`，想法仍是 `POST /book/readreviews`。
+- 墨水屏本章划线失败或为空时，main 才回落 web gateway `/book/underlines`。
+
+
 ## [1.2.50]
 
 ### 合订本热门划线按章补拉

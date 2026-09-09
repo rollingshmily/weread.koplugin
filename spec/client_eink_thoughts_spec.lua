@@ -1,4 +1,4 @@
--- Eink-first underlines/thoughts, web fallback, whole-book list cached.
+-- Eink-first chapter underlines/thoughts, web fallback.
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
@@ -45,55 +45,24 @@ do
                 { chapterUid = 1, range = "1-2", markText = "own" },
             } }
         end,
-        eink_bestbookmarks = function()
-            calls[#calls + 1] = "best"
-            return { updated = {
-                { chapterUid = 1, range = "3-4", markText = "best" },
-                { chapterUid = 9, range = "9-10", markText = "other-chapter" },
+        eink_chapter_underlines = function(_self, _book_id, chapter_uid)
+            calls[#calls + 1] = "heat"
+            expect(tostring(chapter_uid) == "1", "eink underlines are per chapter")
+            return { underlines = {
+                { range = "3-4", count = 12 },
+                { range = "5-6", count = 8 },
             } }
         end,
         gateway = function()
             calls[#calls + 1] = "web"
-            error("web must not run when eink bestbookmarks works")
+            error("web must not run when eink /book/underlines works")
         end,
     }
     local ok, data = client:get_chapter_underlines("book", 1)
-    expect(ok and data and #data.underlines == 2, "eink merges own + popular underlines")
-    expect(data.underlines[1].range == "3-4" and data.underlines[2].range == "1-2",
-        "popular ranges stay first and own ranges are appended")
-    expect(table.concat(calls, ",") == "own,best", "successful eink path skips web")
-end
-
-do
-    local calls = {}
-    local client = make_client {
-        can_eink_download = function() return true end,
-        eink_bookmarklist = function()
-            calls[#calls + 1] = "own"
-            return { updated = {
-                { chapterUid = 1, range = "1-2", markText = "own" },
-            } }
-        end,
-        eink_bestbookmarks = function()
-            calls[#calls + 1] = "best"
-            return {
-                updated = {},
-                items = {
-                    { chapterUid = 1, range = "3-4", markText = "best" },
-                    { chapterUid = 9, range = "9-10", markText = "other-chapter" },
-                },
-            }
-        end,
-        gateway = function()
-            calls[#calls + 1] = "web"
-            error("empty updated must not hide items")
-        end,
-    }
-    local ok, data = client:get_chapter_underlines("book", 1)
-    expect(ok and #data.underlines == 2, "empty updated still uses items")
-    expect(data.underlines[1].range == "3-4" and data.underlines[2].range == "1-2",
-        "items popular ranges stay first")
-    expect(table.concat(calls, ",") == "own,best", "items path skips web")
+    expect(ok and data and #data.underlines == 3, "eink merges chapter heat + own underlines")
+    expect(data.underlines[1].range == "3-4" and data.underlines[3].range == "1-2",
+        "chapter heat ranges stay first and own ranges are appended")
+    expect(table.concat(calls, ",") == "own,heat", "successful eink underlines skip web")
 end
 
 do
@@ -104,38 +73,9 @@ do
             calls[#calls + 1] = "own"
             return { updated = {} }
         end,
-        eink_bestbookmarks = function()
-            calls[#calls + 1] = "best"
-            return {
-                chapters = {
-                    { chapterUid = 1, bookmarks = {
-                        { range = "11-12", markText = "nested" },
-                    } },
-                },
-            }
-        end,
-        gateway = function()
-            calls[#calls + 1] = "web"
-            error("nested chapter bookmarks must count as popular marks")
-        end,
-    }
-    local ok, data = client:get_chapter_underlines("book", 1)
-    expect(ok and data.underlines[1].range == "11-12",
-        "chapters[].bookmarks are flattened")
-    expect(table.concat(calls, ",") == "own,best", "nested popular marks skip web")
-end
-
-do
-    local calls = {}
-    local client = make_client {
-        can_eink_download = function() return true end,
-        eink_bookmarklist = function()
-            calls[#calls + 1] = "own"
-            return { updated = {} }
-        end,
-        eink_bestbookmarks = function()
-            calls[#calls + 1] = "best"
-            return { updated = {}, items = {} }
+        eink_chapter_underlines = function()
+            calls[#calls + 1] = "heat"
+            return { underlines = {} }
         end,
         gateway = function(_self, api)
             calls[#calls + 1] = api
@@ -144,9 +84,9 @@ do
     }
     local ok, data = client:get_chapter_underlines("book", 1)
     expect(ok and data.underlines[1].range == "5-6",
-        "empty popular list falls back to web underlines")
-    expect(table.concat(calls, ",") == "own,best,best,/book/underlines",
-        "web underlines run when book and chapter popular lists are empty")
+        "empty eink chapter heat falls back to web underlines")
+    expect(table.concat(calls, ",") == "own,heat,/book/underlines",
+        "web underlines run when eink chapter heat is empty")
 end
 
 do
@@ -157,9 +97,9 @@ do
             calls[#calls + 1] = "own"
             return { updated = {} }
         end,
-        eink_bestbookmarks = function()
-            calls[#calls + 1] = "best"
-            error("bestbookmarks down")
+        eink_chapter_underlines = function()
+            calls[#calls + 1] = "heat"
+            error("eink underlines down")
         end,
         gateway = function(_self, api)
             calls[#calls + 1] = api
@@ -168,41 +108,9 @@ do
     }
     local ok, data = client:get_chapter_underlines("book", 1)
     expect(ok and data.underlines[1].range == "5-6",
-        "bestbookmarks failure falls back to web underlines")
-    expect(table.concat(calls, ",") == "own,best,best,/book/underlines",
-        "web underlines run only after book and chapter eink lists fail")
-end
-
-do
-    local calls = {}
-    local client = make_client {
-        can_eink_download = function() return true end,
-        eink_bookmarklist = function()
-            calls[#calls + 1] = "own"
-            return { updated = {} }
-        end,
-        eink_bestbookmarks = function(_self, _book_id, chapter_uid)
-            if chapter_uid then
-                calls[#calls + 1] = "chapter"
-                return { items = {
-                    { range = "20-21", markText = "chapter-best" },
-                } }
-            end
-            calls[#calls + 1] = "book"
-            return { items = {
-                { chapterUid = 9, range = "1-2", markText = "other" },
-            } }
-        end,
-        gateway = function()
-            calls[#calls + 1] = "web"
-            error("chapter bestbookmarks should supply this chapter")
-        end,
-    }
-    local ok, data = client:get_chapter_underlines("book", 1316)
-    expect(ok and data.underlines[1].range == "20-21",
-        "chapterUid miss in the book list fetches that chapter")
-    expect(table.concat(calls, ",") == "own,book,chapter",
-        "per-chapter bestbookmarks skip web when they have ranges")
+        "eink underlines failure falls back to web")
+    expect(table.concat(calls, ",") == "own,heat,/book/underlines",
+        "web underlines run only after eink /book/underlines fails")
 end
 
 do
@@ -263,20 +171,25 @@ end
 
 do
     local fetches = 0
+    local last_params
     local client = make_client {
-        eink_json = function()
+        eink_json = function(_self, path, params)
             fetches = fetches + 1
-            return { updated = { { chapterUid = 1, range = "1-2" } } }
+            last_params = { path = path, params = params }
+            return { underlines = { { range = "1-2", count = 3 } } }
         end,
     }
-    client:eink_bestbookmarks("book")
-    client:eink_bestbookmarks("book")
-    expect(fetches == 1, "bestbookmarks is cached per book, not per chapter")
+    client:eink_chapter_underlines("book", 1316)
+    client:eink_chapter_underlines("book", 1316)
+    expect(fetches == 1, "chapter underlines are cached per chapter")
+    expect(last_params.path == "/book/underlines", "uses /book/underlines not bestbookmarks")
+    expect(tostring(last_params.params.chapterUid) == "1316",
+        "chapter underlines request includes chapterUid")
 end
 
 do
     local eink = { vid = "1", access_token = "t" }
-    local best_calls = 0
+    local heat_calls = 0
     local client = make_client {
         settings = {
             get = function(_self, key)
@@ -291,9 +204,9 @@ do
             self:mark_eink_auth_failed()
             error("HTTP 401")
         end,
-        eink_bestbookmarks = function()
-            best_calls = best_calls + 1
-            return { updated = {} }
+        eink_chapter_underlines = function()
+            heat_calls = heat_calls + 1
+            return { underlines = {} }
         end,
         gateway = function()
             return { underlines = { { range = "8-9" } } }
@@ -302,7 +215,7 @@ do
     expect(client:can_eink_download(), "stored eink creds start usable")
     local ok, data = client:get_chapter_underlines("book", 1)
     expect(ok and data.underlines[1].range == "8-9", "401 falls back to web")
-    expect(best_calls == 0, "expired eink must not hit bestbookmarks")
+    expect(heat_calls == 0, "expired eink must not hit /book/underlines")
     expect(not client:can_eink_download(), "later thought requests skip eink")
     expect(eink.auth_failed == true, "eink expiry is remembered")
 end

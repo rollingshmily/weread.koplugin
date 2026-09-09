@@ -63,6 +63,12 @@ do
     }, 1316)
     assert_eq(tostring(stamped[1].chapterUid), "1316",
         "per-chapter payloads stamp the requested chapterUid")
+    local heat = Eink.collect_bookmark_items({
+        underlines = { { range = "8-9", count = 4 } },
+    }, 1316)
+    assert_eq(heat[1].range, "8-9", "chapter heat map underlines are collected")
+    assert_eq(tostring(heat[1].chapterUid), "1316",
+        "chapter heat map ranges inherit the requested chapterUid")
     assert_eq(#Eink.collect_bookmark_items({ updated = {} }), 0,
         "empty payload has no bookmark ranges")
 end

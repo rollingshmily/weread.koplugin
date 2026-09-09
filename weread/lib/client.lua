@@ -796,43 +796,29 @@ function Client:get_chapter_underlines(book_id, chapter_uid)
         if ok_own and type(own) == "table" and not eink_payload_error(own) then
             own_items = own.updated
         end
-        local ok_best, best = false, nil
+        local heat = {}
         if self:can_eink_download() then
-            ok_best, best = pcall(function()
-                return self:eink_bestbookmarks(book_id)
+            local ok_heat, payload = pcall(function()
+                return self:eink_chapter_underlines(book_id, chapter_uid)
             end)
-        end
-        local popular = {}
-        if ok_best and type(best) == "table" and not eink_payload_error(best) then
-            popular = Eink.collect_bookmark_items(best)
-        elseif self:can_eink_download() then
-            logger.warn("eink bestbookmarks failed, falling back to chapter/web:",
-                tostring(not ok_best and best or eink_payload_error(best) or "invalid"))
-        end
-        local rows = merge_own_and_popular(popular, own_items, chapter_uid)
-        if #rows == 0 and self:can_eink_download() then
-            local ok_chapter, chapter_best = pcall(function()
-                return self:eink_bestbookmarks(book_id, chapter_uid)
-            end)
-            if ok_chapter and type(chapter_best) == "table"
-                and not eink_payload_error(chapter_best) then
-                popular = Eink.collect_bookmark_items(chapter_best, chapter_uid)
-                rows = merge_own_and_popular(popular, own_items, chapter_uid)
+            if ok_heat and type(payload) == "table" and not eink_payload_error(payload) then
+                heat = Eink.collect_bookmark_items(payload, chapter_uid)
             else
-                logger.warn("eink bestbookmarks chapter fetch failed:",
-                    tostring(not ok_chapter and chapter_best
-                        or eink_payload_error(chapter_best) or "invalid"))
+                logger.warn("eink /book/underlines failed, falling back to web:",
+                    tostring(not ok_heat and payload
+                        or eink_payload_error(payload) or "invalid"))
             end
         end
+        local rows = merge_own_and_popular(heat, own_items, chapter_uid)
         if #rows > 0 then
             logger.info("chapter underlines via eink",
                 "book=", tostring(book_id), "chapter=", tostring(chapter_uid),
-                "count=", tostring(#rows), "popular=", tostring(#popular))
+                "count=", tostring(#rows), "source=underlines")
             return true, { chapterUid = chapter_uid, underlines = rows }
         end
-        if #popular > 0 then
-            logger.warn("eink bestbookmarks missed chapter, falling back to web:",
-                "chapter=", tostring(chapter_uid), "popular=", tostring(#popular))
+        if self:can_eink_download() then
+            logger.warn("eink /book/underlines empty, falling back to web:",
+                "chapter=", tostring(chapter_uid))
         end
     end
 
@@ -1251,6 +1237,25 @@ function Client:eink_chapterinfo(book_id)
         url = "/book/chapterinfo",
         code = code,
     })
+end
+
+function Client:eink_chapter_underlines(book_id, chapter_uid)
+    book_id = tostring(book_id or "")
+    local cache_key = book_id .. ":" .. tostring(chapter_uid or "")
+    self._eink_underlines_cache = self._eink_underlines_cache or {}
+    if self._eink_underlines_cache[cache_key] then
+        return self._eink_underlines_cache[cache_key]
+    end
+    local data = self:eink_json("/book/underlines", {
+        bookId = book_id,
+        chapterUid = chapter_uid,
+    })
+    local err = eink_payload_error(data)
+    if err then
+        error("eink underlines errCode=" .. tostring(err))
+    end
+    self._eink_underlines_cache[cache_key] = data
+    return data
 end
 
 function Client:eink_bestbookmarks(book_id, chapter_uid)
