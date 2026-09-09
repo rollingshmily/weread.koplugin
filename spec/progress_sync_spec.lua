@@ -536,6 +536,37 @@ test("long resume waits for a real network event before rechecking", function()
         "network event completes deferred recheck")
 end)
 
+test("resume while link is up still waits for NetworkConnected", function()
+    local now = 100
+    local f = fixture({
+        bookId = "book",
+        progress = 25,
+        chapterUid = 22,
+        chapterIdx = 2,
+        chapterOffset = 150,
+        updateTime = 10,
+    }, {
+        is_online = function() return true end,
+        now = function() return now end,
+    })
+    f.sync:on_reader_ready()
+    f.drain()
+    eq(f.sync:status().verified, true, "initial open verifies")
+
+    f.sync:on_suspend()
+    now = 100 + 6 * 60
+    f.sync:on_resume()
+    f.drain()
+    eq(f.sync:status().state, "waiting_for_network",
+        "stale link-up must not start resume network work")
+    eq(f.sync:status().verified, false,
+        "resume recheck stays gated until NetworkConnected")
+
+    f.sync:on_network_connected()
+    eq(f.sync:status().verified, true,
+        "real network event completes deferred recheck")
+end)
+
 test("stale connected state keeps resume recheck queued after child failure", function()
     local now = 100
     local current_remote = {

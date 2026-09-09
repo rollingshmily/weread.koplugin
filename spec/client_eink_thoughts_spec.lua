@@ -70,6 +70,91 @@ do
         can_eink_download = function() return true end,
         eink_bookmarklist = function()
             calls[#calls + 1] = "own"
+            return { updated = {
+                { chapterUid = 1, range = "1-2", markText = "own" },
+            } }
+        end,
+        eink_bestbookmarks = function()
+            calls[#calls + 1] = "best"
+            return {
+                updated = {},
+                items = {
+                    { chapterUid = 1, range = "3-4", markText = "best" },
+                    { chapterUid = 9, range = "9-10", markText = "other-chapter" },
+                },
+            }
+        end,
+        gateway = function()
+            calls[#calls + 1] = "web"
+            error("empty updated must not hide items")
+        end,
+    }
+    local ok, data = client:get_chapter_underlines("book", 1)
+    expect(ok and #data.underlines == 2, "empty updated still uses items")
+    expect(data.underlines[1].range == "3-4" and data.underlines[2].range == "1-2",
+        "items popular ranges stay first")
+    expect(table.concat(calls, ",") == "own,best", "items path skips web")
+end
+
+do
+    local calls = {}
+    local client = make_client {
+        can_eink_download = function() return true end,
+        eink_bookmarklist = function()
+            calls[#calls + 1] = "own"
+            return { updated = {} }
+        end,
+        eink_bestbookmarks = function()
+            calls[#calls + 1] = "best"
+            return {
+                chapters = {
+                    { chapterUid = 1, bookmarks = {
+                        { chapterUid = 1, range = "11-12", markText = "nested" },
+                    } },
+                },
+            }
+        end,
+        gateway = function()
+            calls[#calls + 1] = "web"
+            error("nested chapter bookmarks must count as popular marks")
+        end,
+    }
+    local ok, data = client:get_chapter_underlines("book", 1)
+    expect(ok and data.underlines[1].range == "11-12",
+        "chapters[].bookmarks are flattened")
+    expect(table.concat(calls, ",") == "own,best", "nested popular marks skip web")
+end
+
+do
+    local calls = {}
+    local client = make_client {
+        can_eink_download = function() return true end,
+        eink_bookmarklist = function()
+            calls[#calls + 1] = "own"
+            return { updated = {} }
+        end,
+        eink_bestbookmarks = function()
+            calls[#calls + 1] = "best"
+            return { updated = {}, items = {} }
+        end,
+        gateway = function(_self, api)
+            calls[#calls + 1] = api
+            return { underlines = { { range = "5-6", markText = "web" } } }
+        end,
+    }
+    local ok, data = client:get_chapter_underlines("book", 1)
+    expect(ok and data.underlines[1].range == "5-6",
+        "empty popular list falls back to web underlines")
+    expect(table.concat(calls, ",") == "own,best,/book/underlines",
+        "web underlines run when eink popular list is empty")
+end
+
+do
+    local calls = {}
+    local client = make_client {
+        can_eink_download = function() return true end,
+        eink_bookmarklist = function()
+            calls[#calls + 1] = "own"
             return { updated = {} }
         end,
         eink_bestbookmarks = function()

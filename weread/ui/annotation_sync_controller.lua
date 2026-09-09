@@ -474,7 +474,8 @@ function M:downloadCurrentChapterThoughts()
             return
         end
         logger.info("download current chapter thoughts uid=", Chapters.uid(chapter))
-        self:startUnifiedAnnotationSync({ chapters = { chapter } })
+        -- Refresh so an earlier empty eink parse cannot block a real download.
+        self:startUnifiedAnnotationSync({ chapters = { chapter }, refresh = true })
     end
     local chapter = self:getCurrentMappedChapter()
     if chapter then
@@ -552,6 +553,14 @@ function M:_annotationPrefetchChapters(context)
         if partials[uid] then return true end
         local source = sources[uid]
         if not source then return true end
+        -- A previous empty eink parse must not permanently skip this chapter.
+        if tonumber(source.total) == 0 then
+            self._empty_underline_retry = self._empty_underline_retry or {}
+            if not self._empty_underline_retry[uid] then
+                self._empty_underline_retry[uid] = true
+                return true
+            end
+        end
         -- Subprocess prefetch stores source without matching the open document.
         if not context.document_key then return false end
         local key = context.store:projectionKey(context.document_key, uid)

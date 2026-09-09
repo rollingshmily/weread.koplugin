@@ -1125,11 +1125,9 @@ function ProgressSync:on_resume()
         self:_clear_verified("resume_recheck")
         self.state = "waiting_for_network"
     end
-    if self.is_online() then
-        self.scheduler:scheduleIn(0.1, function()
-            self:on_network_connected()
-        end)
-    end
+    -- Kindle still reports link-up while NetworkMgr forces DHCP. Hitting the
+    -- network here blocks the UI thread until Wi-Fi actually returns.
+    -- Queue the recheck and wait for the real NetworkConnected event.
 end
 
 function ProgressSync:_pending_upload()

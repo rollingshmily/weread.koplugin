@@ -171,6 +171,9 @@ end
 function M:onPageUpdate()
     self.progress_sync:on_page_update()
     if not self.maybePrefetchOpenDocumentAnnotations then return end
+    if self._resume_quiet_until and os.time() < self._resume_quiet_until then
+        return
+    end
     -- Wait until paging settles. Hitting the network on every page turn
     -- flashes the Kindle status corner and can reflow the book.
     local gen = self._reader_session_gen
@@ -356,11 +359,17 @@ end
 function M:onSuspend()
     if self._cancelUnifiedAnnotationSync then self:_cancelUnifiedAnnotationSync() end
     self._annotation_pending_prefetch = nil
+    if self._thought_prefetch_task then
+        pcall(function() UIManager:unschedule(self._thought_prefetch_task) end)
+        self._thought_prefetch_task = nil
+    end
     self.progress_sync:on_suspend()
     self.read_report:on_suspend()
 end
 
 function M:onResume()
+    -- Keep thought prefetch off until Wi-Fi finishes DHCP after a long sleep.
+    self._resume_quiet_until = os.time() + 8
     self.progress_sync:on_resume()
     self.read_report:on_resume()
 end

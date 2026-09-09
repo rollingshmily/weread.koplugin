@@ -743,6 +743,44 @@ function Eink.files_to_chapter_bodies(files, chapters)
     return bodies, assets
 end
 
+local function bookmark_has_range(item)
+    return type(item) == "table" and item.range ~= nil and tostring(item.range) ~= ""
+end
+
+-- bestbookmarks may include an empty `updated` list plus the real marks in
+-- `items` or `chapters[].bookmarks`. Empty tables are truthy, so callers must
+-- not do `payload.updated or payload.items`.
+function Eink.collect_bookmark_items(payload)
+    local items, seen = {}, {}
+    local function add_item(item)
+        if not bookmark_has_range(item) then return end
+        local key = tostring(item.chapterUid or "") .. ":" .. tostring(item.range)
+        if seen[key] then return end
+        seen[key] = true
+        items[#items + 1] = item
+    end
+    local function add_list(list)
+        if type(list) ~= "table" then return end
+        for _, item in ipairs(list) do
+            if bookmark_has_range(item) then
+                add_item(item)
+            elseif type(item) == "table" then
+                add_list(item.bookmarks or item.items or item.marks or item.updated)
+            end
+        end
+    end
+    if type(payload) ~= "table" then return items end
+    add_list(payload.items)
+    add_list(payload.bookmarks)
+    add_list(payload.marks)
+    add_list(payload.chapters)
+    add_list(payload.chapterBestBookmarks)
+    if bookmark_has_range((payload.updated or {})[1]) then
+        add_list(payload.updated)
+    end
+    return items
+end
+
 function Eink.underlines_for_chapter(bookmark_items, chapter_uid)
     local underlines = {}
     chapter_uid = tonumber(chapter_uid)
