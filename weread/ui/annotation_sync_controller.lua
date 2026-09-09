@@ -383,15 +383,23 @@ function M:_runAnnotationJob(context, options)
                     if self._xpointer_overlay then
                         self._xpointer_overlay._annotation_window = nil
                     end
-                    if not options.background then
+                    -- Overlay records only; never setStyleSheet here.
+                    -- Background prefetch used to skip this, so the next
+                    -- chapter was in the store but invisible until reopen.
+                    if not options.prefetch then
                         self:_refreshAnnotationOverlay()
-                        if first then self:applyAnnotationVisibility() end
+                        if first and not options.background then
+                            self:applyAnnotationVisibility()
+                        end
                     end
                 end
                 if not options.background then
                     self:showInfo(T(_("Matched %1/%2 underlines in %3/%4 chapters."),
                         tostring(summary.located), tostring(summary.total),
                         tostring(summary.chapters), tostring(#context.chapters)))
+                    if self.maybePrefetchOpenDocumentAnnotations then
+                        self:maybePrefetchOpenDocumentAnnotations()
+                    end
                 end
             end
             if done == nil then self._annotation_prefetch_signature = nil end

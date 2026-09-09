@@ -170,6 +170,12 @@ end
 
 function M:onPageUpdate()
     self.progress_sync:on_page_update()
+    -- Prefetch writes projections in the background. Reload the overlay
+    -- window on page turn so the next chapter's marks are visible without
+    -- a stylesheet reflow.
+    if self._refreshAnnotationOverlay then
+        self:_refreshAnnotationOverlay()
+    end
     if not self.maybePrefetchOpenDocumentAnnotations then return end
     if self._resume_quiet_until and os.time() < self._resume_quiet_until then
         return
