@@ -351,9 +351,21 @@ function CenterThoughtPopupWidget:onClose()
 end
 
 function CenterThoughtPopupWidget:onTapClose(_, ges)
+    if not self.container or not self.container.dimen then
+        return false
+    end
     if ges.pos:notIntersectWith(self.container.dimen) then
         UIManager:close(self)
         return true
+    end
+    -- Do not swallow TitleBar / Comment / pager taps; those widgets handle them.
+    if self._button_table and self._button_table.dimen
+        and ges.pos:intersectWith(self._button_table.dimen) then
+        return false
+    end
+    if self._titlebar and self._titlebar.dimen
+        and ges.pos:intersectWith(self._titlebar.dimen) then
+        return false
     end
     local viewport = self._viewport
     if viewport and viewport.dimen and ges.pos:intersectWith(viewport.dimen) then
@@ -363,17 +375,17 @@ function CenterThoughtPopupWidget:onTapClose(_, ges)
             Comment.replyToItem(self:_commentContext(), item)
             return true
         end
-    end
-    -- Optional tap-to-page: left/right half of the window flips pages.
-    if self.tap_to_page then
-        local dimen = self.container.dimen
-        if BD.flipIfMirroredUILayout(ges.pos.x < dimen.x + dimen.w / 2) then
-            self:changePage(-1)
-        else
-            self:changePage(1)
+        if self.tap_to_page then
+            local dimen = self.container.dimen
+            if BD.flipIfMirroredUILayout(ges.pos.x < dimen.x + dimen.w / 2) then
+                self:changePage(-1)
+            else
+                self:changePage(1)
+            end
+            return true
         end
     end
-    return true
+    return false
 end
 
 function CenterThoughtPopupWidget:onSwipe(_, ges)

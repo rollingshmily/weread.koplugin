@@ -2,6 +2,7 @@
 
 local UIManager = require("ui/uimanager")
 local PluginUtil = require("weread.lib.plugin_util")
+local logger = require("weread.lib.logger")
 local _ = PluginUtil.tr
 local T = PluginUtil.T
 
@@ -30,7 +31,12 @@ function Comment.findPieceAtY(renderer, items, y)
     return nil, nil
 end
 
-local function notify(plugin, text)
+local function notify(plugin, text, sticky)
+    logger.info("thought comment:", text)
+    if plugin and plugin.showInfo and sticky then
+        plugin:showInfo(text)
+        return
+    end
     if plugin and plugin.showTransientInfo then
         plugin:showTransientInfo(text, 2)
         return
@@ -86,12 +92,16 @@ end
 
 function Comment.commentOnHighlight(ctx)
     local plugin = ctx and ctx.plugin
+    logger.info("thought comment tap",
+        "book=", tostring(ctx and ctx.book_id),
+        "chapter=", tostring(ctx and ctx.chapter_uid),
+        "range=", tostring(ctx and ctx.range))
     if not can_upload(plugin) then
-        notify(plugin, _("Sign in to eink to comment."))
+        notify(plugin, _("Sign in to eink to comment."), true)
         return
     end
     if not ctx.book_id or not ctx.chapter_uid or not ctx.range then
-        notify(plugin, _("Could not determine the current chapter."))
+        notify(plugin, _("Could not determine the current chapter."), true)
         return
     end
     Comment.prompt(_("Comment"), function(content)
@@ -121,12 +131,12 @@ end
 function Comment.replyToItem(ctx, item)
     local plugin = ctx and ctx.plugin
     if not can_upload(plugin) then
-        notify(plugin, _("Sign in to eink to comment."))
+        notify(plugin, _("Sign in to eink to comment."), true)
         return
     end
     local review_id = item and (item.reviewId or item.review_id)
     if not review_id or tostring(review_id) == "" then
-        notify(plugin, _("Download this chapter's thoughts again to reply."))
+        notify(plugin, _("Download this chapter's thoughts again to reply."), true)
         return
     end
     local author = tostring(item.author or "")

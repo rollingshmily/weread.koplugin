@@ -232,8 +232,9 @@ function ThoughtPopupWidget:onTapClose(_, ges)
             Comment.replyToItem(self:_commentContext(), item)
             return true
         end
+        return false
     end
-    return true
+    return false
 end
 
 function ThoughtPopupWidget:onSwipeClose(_, ges)
