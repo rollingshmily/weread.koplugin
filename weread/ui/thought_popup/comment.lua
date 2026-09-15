@@ -7,6 +7,39 @@ local _ = PluginUtil.tr
 local T = PluginUtil.T
 
 local Comment = {}
+Comment._ctx = nil
+
+function Comment.setContext(ctx)
+    Comment._ctx = ctx
+end
+
+function Comment.resolve(popup)
+    local ctx = {}
+    local function take(src)
+        if type(src) ~= "table" then return end
+        for _, key in ipairs({
+            "plugin", "book_id", "chapter_uid", "range", "abstract",
+        }) do
+            if ctx[key] == nil and src[key] ~= nil and src[key] ~= "" then
+                ctx[key] = src[key]
+            end
+        end
+        if ctx.chapter_uid == nil and src.chapterUid ~= nil then
+            ctx.chapter_uid = src.chapterUid
+        end
+        if ctx.book_id == nil and src.bookId ~= nil then
+            ctx.book_id = src.bookId
+        end
+    end
+    take(popup and popup.comment_ctx)
+    take(Comment._ctx)
+    take(popup and popup.items and popup.items[1])
+    take(popup)
+    if ctx.plugin and (ctx.book_id == nil or ctx.book_id == "") then
+        ctx.book_id = ctx.plugin._current_weread_book_id
+    end
+    return ctx
+end
 
 function Comment.findPieceAtY(renderer, items, y)
     local pieces = renderer and renderer.layout and renderer.layout.pieces
@@ -43,7 +76,10 @@ local function notify(plugin, text, sticky)
     end
     if plugin and plugin.showInfo then
         plugin:showInfo(text)
+        return
     end
+    local InfoMessage = require("ui/widget/infomessage")
+    UIManager:show(InfoMessage:new{ text = text })
 end
 
 local function can_upload(plugin)
@@ -90,12 +126,18 @@ function Comment.prompt(title, on_submit)
     end
 end
 
-function Comment.commentOnHighlight(ctx)
+function Comment.commentOnHighlight(popup)
+    local ctx = Comment.resolve(popup)
     local plugin = ctx and ctx.plugin
     logger.info("thought comment tap",
         "book=", tostring(ctx and ctx.book_id),
         "chapter=", tostring(ctx and ctx.chapter_uid),
-        "range=", tostring(ctx and ctx.range))
+        "range=", tostring(ctx and ctx.range),
+        "plugin=", tostring(plugin ~= nil))
+    if not plugin then
+        notify(nil, _("Could not determine the current chapter."), true)
+        return
+    end
     if not can_upload(plugin) then
         notify(plugin, _("Sign in to eink to comment."), true)
         return
@@ -128,8 +170,13 @@ function Comment.commentOnHighlight(ctx)
     end)
 end
 
-function Comment.replyToItem(ctx, item)
+function Comment.replyToItem(popup, item)
+    local ctx = Comment.resolve(popup)
     local plugin = ctx and ctx.plugin
+    if not plugin then
+        notify(nil, _("Could not determine the current chapter."), true)
+        return
+    end
     if not can_upload(plugin) then
         notify(plugin, _("Sign in to eink to comment."), true)
         return
@@ -167,7 +214,7 @@ function Comment.actionButtons(popup, item, extra)
             {
                 text = _("Comment"),
                 callback = extra.close_then(function()
-                    Comment.commentOnHighlight(popup.comment_ctx)
+                    Comment.commentOnHighlight(popup)
                 end),
             },
         }
@@ -176,7 +223,7 @@ function Comment.actionButtons(popup, item, extra)
         {
             text = _("Reply"),
             callback = extra.close_then(function()
-                Comment.replyToItem(popup.comment_ctx, item)
+                Comment.replyToItem(popup, item)
             end),
         },
         {

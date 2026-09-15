@@ -162,14 +162,6 @@ function CenterThoughtPopupWidget:_title()
     return _("Thoughts")
 end
 
-function CenterThoughtPopupWidget:_commentContext()
-    local ctx = self.comment_ctx or {}
-    if not ctx.abstract then
-        ctx.abstract = self.items and self.items[1] and self.items[1].abstract
-    end
-    return ctx
-end
-
 --- Previous / page indicator / Next button row.
 function CenterThoughtPopupWidget:_buildButtons()
     local popup = self
@@ -206,7 +198,7 @@ function CenterThoughtPopupWidget:_buttonRows()
                 text = _("Comment"),
                 id = "comment_highlight",
                 callback = function()
-                    Comment.commentOnHighlight(popup:_commentContext())
+                    Comment.commentOnHighlight(popup)
                 end,
             },
         },
@@ -372,7 +364,7 @@ function CenterThoughtPopupWidget:onTapClose(_, ges)
         local content_y = (ges.pos.y - viewport.dimen.y) + (self._page_starts[self.page_index] or 0)
         local piece, item = Comment.findPieceAtY(self._pages, self.items, content_y)
         if piece and piece.variant == "meta" and item then
-            Comment.replyToItem(self:_commentContext(), item)
+            Comment.replyToItem(self, item)
             return true
         end
         if self.tap_to_page then

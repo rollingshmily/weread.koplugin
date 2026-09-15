@@ -54,5 +54,17 @@ expect(piece and piece.variant == "quote", "quote line is not a nickname")
 
 expect(Comment.findPieceAtY(renderer, items, 999) == nil, "missed y returns nil")
 
+Comment.setContext({
+    plugin = { _current_weread_book_id = "465030" },
+    book_id = "465030",
+    chapter_uid = 1898,
+    range = "10-20",
+})
+local ctx = Comment.resolve({ items = { { abstract = "银" } } })
+expect(ctx.book_id == "465030" and ctx.chapter_uid == 1898 and ctx.range == "10-20",
+    "module context fills book/chapter/range when widget ctx is missing")
+expect(ctx.abstract == "银", "item abstract is used when ctx has none")
+Comment.setContext(nil)
+
 print(string.format("thought_popup_comment_spec: %d checks, %d failure(s)", checks, failures))
 os.exit(failures == 0 and 0 or 1)

@@ -119,6 +119,8 @@ function ThoughtDB.getReviewItems(db, chapter_uid, range_str)
             likes_count = row[4],
             reviewId = row[5],
             authorVid = row[6],
+            chapter_uid = chapter_uid,
+            range = range_str,
         }
         step_ok, row = pcall(function() return stmt:step() end)
         if not step_ok then

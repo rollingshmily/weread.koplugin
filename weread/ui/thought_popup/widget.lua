@@ -211,14 +211,6 @@ function ThoughtPopupWidget:onClose()
     return true
 end
 
-function ThoughtPopupWidget:_commentContext()
-    local ctx = self.comment_ctx or {}
-    if not ctx.abstract then
-        ctx.abstract = self.items and self.items[1] and self.items[1].abstract
-    end
-    return ctx
-end
-
 function ThoughtPopupWidget:onTapClose(_, ges)
     if ges.pos:notIntersectWith(self.container.dimen) then
         UIManager:close(self)
@@ -229,7 +221,7 @@ function ThoughtPopupWidget:onTapClose(_, ges)
         local content_y = (ges.pos.y - scroll.dimen.y) + (scroll.scroll_offset or 0)
         local piece, item = Comment.findPieceAtY(self._pages, self.items, content_y)
         if piece and piece.variant == "meta" and item then
-            Comment.replyToItem(self:_commentContext(), item)
+            Comment.replyToItem(self, item)
             return true
         end
         return false

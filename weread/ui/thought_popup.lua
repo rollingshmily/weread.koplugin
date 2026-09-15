@@ -19,6 +19,7 @@ same thought rebuilds nothing.
 @module weread.ui.thought_popup
 --]]
 
+local Comment = require("weread.ui.thought_popup.comment")
 local FaceFactory = require("weread.ui.thought_popup.face_factory")
 local UIManager = require("ui/uimanager")
 
@@ -53,6 +54,7 @@ function M.show(opts)
     -- public contract uses "pages". Normalize once so the initial construction
     -- and the pooled reopen below both receive the items.
     opts.items = opts.items or opts.pages
+    Comment.setContext(opts.comment_ctx)
 
     local position = normalizePosition(opts.position)
 
@@ -74,6 +76,7 @@ function M.show(opts)
     local pooled = _pool[position]
     if pooled then
         pooled:_reopen(opts)
+        pooled.comment_ctx = opts.comment_ctx
         UIManager:show(pooled)
         return pooled
     end
@@ -91,6 +94,7 @@ function M.show(opts)
         close_callback = opts.close_callback,
         comment_ctx = opts.comment_ctx,
     }
+    popup.comment_ctx = opts.comment_ctx
     _pool[position] = popup
     UIManager:show(popup)
     return popup
@@ -131,6 +135,7 @@ function M.getPoolStats()
 end
 
 function M.cleanup()
+    Comment.setContext(nil)
     if not next(_pool) then
         return
     end
@@ -143,6 +148,7 @@ function M.cleanup()
         pooled:_freeContentCaches()
     end
     _pool = {}
+    Comment.setContext(nil)
     pcall(function()
         FaceFactory:clearCache()
     end)
