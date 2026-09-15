@@ -131,13 +131,17 @@ function M:getAccountMenuItems()
             if self.settings:is_eink_configured() then
                 return T(_("Eink login · %1"), self:einkLoginName())
             end
-            return _("Eink login (fast download)")
+            return _("Eink login (fast download / upload highlights)")
         end,
         keep_menu_open = true,
     }
     if self.settings:is_eink_configured() then
         eink_item.sub_item_table_func = function()
             return {
+                {
+                    text = _("Local highlights upload to WeRead while signed in"),
+                    enabled = false,
+                },
                 {
                     text = _("Scan again"),
                     keep_menu_open = true,

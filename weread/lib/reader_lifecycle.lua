@@ -116,6 +116,7 @@ function M:onReaderReady()
     self._current_weread_file = nil
     self._current_weread_book_id = nil
     self:_installReaderHighlightTapGuard()
+    require("weread.lib.eink_annotation_upload").uninstall(self)
 
     local current_file = self.ui and self.ui.document and self.ui.document.file
     local detect_started = time.now()
@@ -130,6 +131,7 @@ function M:onReaderReady()
         -- we must intercept taps on thought links to suppress the native footnote
         -- popup. Visibility is decided inside _onThoughtTap / applyAnnotationVisibility.
         self:_setupThoughtInterception()
+        require("weread.lib.eink_annotation_upload").install(self)
         -- ThoughtDB is intentionally lazy: opening a document must not perform
         -- SQLite I/O on the reader lifecycle. It is opened on the first thought
         -- tap instead.
@@ -219,6 +221,7 @@ function M:onCloseDocument()
     self._current_weread_file = nil
     self._current_weread_book_id = nil
     self:_teardownThoughtInterception()
+    require("weread.lib.eink_annotation_upload").uninstall(self)
     require("weread.ui.thought_popup").cleanup()
     self:_teardownXPointerOverlayPrototype()
     self:_removeReaderHighlightTapGuard()

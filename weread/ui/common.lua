@@ -290,7 +290,7 @@ end
 
 function M:confirmClearEinkAccount()
     UIManager:show(ConfirmBox:new{
-        text = _("Sign out eink login? Full-book fast download will fall back to web."),
+        text = _("Sign out eink login? Full-book fast download will fall back to web. Local highlights will stop uploading."),
         ok_text = _("Sign out"),
         ok_callback = self:safeCallback(_("Sign out"), function()
             if self.eink_qr_login then self.eink_qr_login:cancel() end

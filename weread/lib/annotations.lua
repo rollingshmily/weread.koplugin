@@ -508,4 +508,64 @@ function Annotations.process(html, chapter_underlines, thought_reviews, book_id)
     return html, ""
 end
 
+--- Map visible mark text back to a WeRead HTML rune range.
+-- Range format matches download: "start-end", 0-indexed, end exclusive.
+-- Matching walks the original HTML, skips tags, and requires exactly one hit.
+-- Multiple matches or no match return nil; never guess.
+function Annotations.rangeFromMarkText(html, mark_text)
+    if type(html) ~= "string" or html == "" then
+        return nil
+    end
+    if type(mark_text) ~= "string" or mark_text == "" then
+        return nil
+    end
+    html = stripLeadingBOM(html)
+    local needle = toRunes(mark_text)
+    if #needle == 0 then
+        return nil
+    end
+    local html_runes = toRunes(html)
+    local visible_index = {}
+    local visible_runes = {}
+    local in_tag = false
+    for index, rune in ipairs(html_runes) do
+        if not in_tag and rune == "<" then
+            in_tag = true
+        elseif in_tag and rune == ">" then
+            in_tag = false
+        elseif not in_tag then
+            visible_index[#visible_index + 1] = index
+            visible_runes[#visible_runes + 1] = rune
+        end
+    end
+    if #visible_runes < #needle then
+        return nil
+    end
+    local found
+    for start = 1, #visible_runes - #needle + 1 do
+        local matched = true
+        for offset = 1, #needle do
+            if visible_runes[start + offset - 1] ~= needle[offset] then
+                matched = false
+                break
+            end
+        end
+        if matched then
+            if found then
+                return nil
+            end
+            found = start
+        end
+    end
+    if not found then
+        return nil
+    end
+    local first = visible_index[found]
+    local last = visible_index[found + #needle - 1]
+    if not first or not last then
+        return nil
+    end
+    return tostring(first - 1) .. "-" .. tostring(last)
+end
+
 return Annotations

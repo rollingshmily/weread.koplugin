@@ -1360,4 +1360,123 @@ function Client:eink_download_zip(book_id, chapters_param)
     return Eink.unzip_encrypted(body, password)
 end
 
+local ADD_BOOKMARK_KEYS = {
+    "bookId", "chapterUid", "type", "range", "markText", "bookVersion", "style",
+}
+local ADD_REVIEW_KEYS = {
+    "bookId", "chapterUid", "type", "range", "content", "abstract",
+    "bookVersion", "isPrivate", "friendship", "htmlContent", "title",
+    "notVisibleToFriends",
+}
+local USEREDIT_REVIEW_KEYS = {
+    "reviewId", "content", "isPrivate", "friendship", "notVisibleToFriends",
+    "type", "bookId", "chapterUid", "range", "abstract",
+}
+
+local function copy_known_keys(source, keys)
+    local payload = {}
+    for _, key in ipairs(keys) do
+        if source and source[key] ~= nil then
+            payload[key] = source[key]
+        end
+    end
+    return payload
+end
+
+function Client:eink_add_bookmark(fields)
+    local payload = copy_known_keys(fields, ADD_BOOKMARK_KEYS)
+    payload.bookId = tostring(payload.bookId or "")
+    payload.chapterUid = tonumber(payload.chapterUid)
+    payload.type = tonumber(payload.type) or 1
+    payload.range = tostring(payload.range or "")
+    payload.markText = tostring(payload.markText or "")
+    payload.bookVersion = tonumber(payload.bookVersion) or 0
+    payload.style = tonumber(payload.style) or 0
+    if payload.bookId == "" or not payload.chapterUid
+        or payload.range == "" or payload.markText == "" then
+        error("eink addBookmark missing bookId/chapterUid/range/markText")
+    end
+    local data = self:eink_post_json("/book/addBookmark", payload)
+    self._eink_bookmark_cache = nil
+    return data
+end
+
+function Client:eink_remove_bookmark(bookmark_id)
+    bookmark_id = tostring(bookmark_id or "")
+    if bookmark_id == "" then
+        error("eink removeBookmark missing bookmarkId")
+    end
+    local data = self:eink_post_json("/book/removeBookmark", {
+        bookmarkId = bookmark_id,
+    })
+    self._eink_bookmark_cache = nil
+    return data
+end
+
+function Client:eink_update_bookmark(bookmark_id, style)
+    bookmark_id = tostring(bookmark_id or "")
+    if bookmark_id == "" then
+        error("eink updateBookmark missing bookmarkId")
+    end
+    local payload = { bookmarkId = bookmark_id }
+    if style ~= nil then
+        payload.style = style
+    end
+    local data = self:eink_post_json("/book/updateBookmark", payload)
+    self._eink_bookmark_cache = nil
+    return data
+end
+
+function Client:eink_add_review(fields)
+    local payload = copy_known_keys(fields, ADD_REVIEW_KEYS)
+    payload.bookId = tostring(payload.bookId or "")
+    payload.chapterUid = tonumber(payload.chapterUid)
+    payload.type = tonumber(payload.type) or 1
+    payload.range = tostring(payload.range or "")
+    payload.content = tostring(payload.content or "")
+    payload.bookVersion = tonumber(payload.bookVersion) or 0
+    payload.isPrivate = tonumber(payload.isPrivate) or 0
+    payload.friendship = tonumber(payload.friendship) or 0
+    payload.notVisibleToFriends = tonumber(payload.notVisibleToFriends) or 0
+    if payload.htmlContent == nil then payload.htmlContent = "" end
+    if payload.title == nil then payload.title = "" end
+    if payload.bookId == "" or not payload.chapterUid
+        or payload.range == "" or payload.content == "" then
+        error("eink review/add missing bookId/chapterUid/range/content")
+    end
+    local data = self:eink_post_json("/review/add", payload)
+    self._eink_bookmark_cache = nil
+    return data
+end
+
+function Client:eink_useredit_review(fields)
+    local payload = copy_known_keys(fields, USEREDIT_REVIEW_KEYS)
+    payload.reviewId = tostring(payload.reviewId or "")
+    payload.content = tostring(payload.content or "")
+    if payload.reviewId == "" or payload.content == "" then
+        error("eink review/useredit missing reviewId/content")
+    end
+    if payload.chapterUid ~= nil then
+        payload.chapterUid = tonumber(payload.chapterUid)
+    end
+    if payload.type ~= nil then
+        payload.type = tonumber(payload.type) or 1
+    end
+    local data = self:eink_post_json("/review/useredit", payload)
+    self._eink_bookmark_cache = nil
+    return data
+end
+
+function Client:eink_delete_review(review_id)
+    review_id = tostring(review_id or "")
+    if review_id == "" then
+        error("eink review/delete missing reviewId")
+    end
+    local data = self:eink_post_json("/review/delete", {
+        reviewId = review_id,
+    })
+    self._eink_bookmark_cache = nil
+    return data
+end
+
 return Client
