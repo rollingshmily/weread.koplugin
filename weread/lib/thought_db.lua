@@ -90,7 +90,7 @@ function ThoughtDB.open(book_dir)
 end
 
 --- Look up native-dialog thought records for a (chapter_uid, range) pair.
-function ThoughtDB.getReviewItems(db, chapter_uid, range_str)
+function ThoughtDB.getReviewItems(db, chapter_uid, range_str, book_id)
     if not db then return nil end
 
     local ok, stmt = pcall(function()
@@ -119,6 +119,7 @@ function ThoughtDB.getReviewItems(db, chapter_uid, range_str)
             likes_count = row[4],
             reviewId = row[5],
             authorVid = row[6],
+            book_id = book_id,
             chapter_uid = chapter_uid,
             range = range_str,
         }

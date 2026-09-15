@@ -570,7 +570,11 @@ function ExternalAnnotations.locate(document, chapters, options)
                         book_id = book_id,
                         chapter_uid = uid,
                         range = underline_range,
-                        items = review and Annotations.buildThoughtPopupItems(review) or {},
+                        items = review and Annotations.buildThoughtPopupItems(review, {
+                            book_id = book_id,
+                            chapter_uid = uid,
+                            range = underline_range,
+                        }) or {},
                         partial = partial or nil,
                     }
                     stats.located = stats.located + 1

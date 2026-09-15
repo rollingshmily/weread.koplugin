@@ -28,6 +28,53 @@ local function expect(value, label)
 end
 
 do
+    local Source = require("weread.lib.annotation_source")
+    local zip_calls = 0
+    local plugin = {
+        _current_weread_book_id = "465030",
+        client = {
+            can_eink_download = function() return true end,
+            eink_download_zip = function()
+                zip_calls = zip_calls + 1
+                error("must not download chapter zip")
+            end,
+            eink_add_bookmark = function(_self, payload)
+                return { bookmarkId = "bm-stored", range = payload.range }
+            end,
+        },
+        settings = {
+            get = function()
+                return {
+                    ["465030"] = {
+                        book_id = "465030",
+                        chapters = { { chapterUid = 1395 } },
+                    },
+                }
+            end,
+        },
+        ui = { document = { file = "/tmp/book.epub" } },
+        getChapterInfoFromFile = function()
+            return 1, { chapterUid = 1395 }, false
+        end,
+        _annotation_context = {
+            store = {
+                get = function(_self, _book_id, kind, key)
+                    expect(kind == "original" and tostring(key) == "1395",
+                        "stored original is keyed by chapter")
+                    return Source.index("<p>你好世界</p>")
+                end,
+            },
+        },
+    }
+    local item = { text = "你好世界", pos0 = "xpointer" }
+    local _, kind = Upload.upload_added(plugin, item)
+    expect(kind == "bookmark", "stored original uploads a bookmark")
+    expect(item.weread.range == "3-7", "stored original yields the HTML range")
+    expect(zip_calls == 0, "stored original does not download chapter zip")
+    Upload._html_cache = {}
+end
+
+do
     local posted = {}
     local plugin = {
         _current_weread_book_id = "465030",

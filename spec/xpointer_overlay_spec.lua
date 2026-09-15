@@ -286,6 +286,9 @@ local tap_host = {
         hitTest = function()
             return {
                 text = "quote",
+                book_id = "465030",
+                chapter_uid = 1898,
+                range = "10-20",
                 items = {
                     { abstract = "quote", author = "ann", content = "hello", likes_count = 1 },
                 },
@@ -299,5 +302,8 @@ expect(shown_opts and shown_opts.pages and shown_opts.pages[1].content == "hello
     "local-book overlay did not open the thought popup")
 expect(shown_opts and shown_opts.position == "center" and shown_opts.height_ratio == 0.70,
     "local-book overlay did not use the shared thought popup settings")
+expect(shown_opts and shown_opts.comment_ctx and shown_opts.comment_ctx.chapter_uid == 1898
+        and shown_opts.pages[1].range == "10-20",
+    "overlay thought popup did not keep the underline chapter and range")
 
 print(("xpointer_overlay_spec: %d checks"):format(checks))

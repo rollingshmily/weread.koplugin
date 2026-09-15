@@ -237,11 +237,16 @@ Annotations.thoughtAnchorId = thoughtAnchorId
 -- never has to decode the chapter JSON or start an HTML renderer.
 -- @table range_review  A range review containing .pageReviews
 -- @return table  Ordered thought items
-function Annotations.buildThoughtPopupItems(range_review)
+function Annotations.buildThoughtPopupItems(range_review, meta)
     if type(range_review) ~= "table" or type(range_review.pageReviews) ~= "table"
         or #range_review.pageReviews == 0 then
         return {}
     end
+    meta = meta or {}
+    local book_id = meta.book_id or range_review.bookId or range_review.book_id
+    local chapter_uid = meta.chapter_uid or range_review.chapterUid
+        or range_review.chapter_uid
+    local range = meta.range or range_review.range
 
     local items = {}
     for i, pr in ipairs(range_review.pageReviews) do
@@ -262,6 +267,9 @@ function Annotations.buildThoughtPopupItems(range_review)
                 content = tostring(review.content or ""),
                 likes_count = tonumber(pr.likesCount) or 0,
                 reviewId = tostring(review.reviewId or pr.reviewId or ""),
+                book_id = book_id,
+                chapter_uid = chapter_uid,
+                range = range,
             }
         end
     end

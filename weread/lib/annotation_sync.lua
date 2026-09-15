@@ -204,7 +204,8 @@ function Sync:run()
         for _, review in ipairs(source.reviews or {}) do
             local range = tostring(review.range or "")
             items[#items + 1] = { kind = "thought", key = uid .. ":" .. range, uid = uid,
-                value = require("weread.lib.annotations").buildThoughtPopupItems(review) }
+                value = require("weread.lib.annotations").buildThoughtPopupItems(review, {
+                    book_id = book_id, chapter_uid = uid, range = range }) }
         end
         -- Stage per-range items and the chapter snapshot in one transaction;
         -- source/projection commit also removes the resumable staging rows.

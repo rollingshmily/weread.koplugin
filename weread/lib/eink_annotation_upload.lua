@@ -4,6 +4,7 @@
 local Annotations = require("weread.lib.annotations")
 local Chapters = require("weread.lib.annotation_chapters")
 local Eink = require("weread.lib.eink")
+local Source = require("weread.lib.annotation_source")
 local logger = require("weread.lib.logger")
 
 local unpack = unpack
@@ -129,9 +130,38 @@ function Upload.original_chapter_html(client, book, chapter)
     return html
 end
 
-function Upload.range_for_item(client, book, chapter, item)
+function Upload.stored_original(plugin, book_id, chapter_uid)
+    if not plugin or book_id == nil or chapter_uid == nil then return nil end
+    local store = plugin._annotation_context and plugin._annotation_context.store
+    if not store and type(plugin._annotationStore) == "function" then
+        store = plugin:_annotationStore()
+    end
+    if not store or type(store.get) ~= "function" then return nil end
+    local ok, original = pcall(store.get, store, tostring(book_id), "original",
+        tostring(chapter_uid))
+    if ok then return original end
+    return nil
+end
+
+function Upload.range_for_item(client, book, chapter, item, plugin)
     local text = mark_text(item)
     if not text then return nil end
+    local book_id = book and (book.book_id or book.bookId)
+    local uid = chapter and chapter.chapterUid
+    local original = Upload.stored_original(plugin, book_id, uid)
+    if type(original) == "table" then
+        local range = Source.rangeFromMarkText(original, text)
+        if range then
+            logger.info("eink upload using stored original", "chapter=", tostring(uid))
+            return range
+        end
+    elseif type(original) == "string" and original ~= "" then
+        local range = Annotations.rangeFromMarkText(original, text)
+        if range then
+            logger.info("eink upload using stored original html", "chapter=", tostring(uid))
+            return range
+        end
+    end
     local html = Upload.original_chapter_html(client, book, chapter)
     if not html then return nil end
     return Annotations.rangeFromMarkText(html, text)
@@ -165,7 +195,7 @@ local function locate(plugin, item)
     end
     local range = item.weread and item.weread.range
     if not range or range == "" then
-        range = Upload.range_for_item(plugin.client, book, chapter, item)
+        range = Upload.range_for_item(plugin.client, book, chapter, item, plugin)
     end
     if not range then
         logger.warn("eink upload skipped: unique range not found")

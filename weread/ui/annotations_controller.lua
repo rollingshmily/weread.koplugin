@@ -323,13 +323,15 @@ function M:_showThoughtPopup(pages, link, session_gen, tap_started)
     local ok, popup = pcall(function()
         local href = self:_linkHref(link)
         local info = href and self:_parseThoughtHref(href) or nil
+        local location = {
+            plugin = self,
+            book_id = info and info.book_id or self._current_weread_book_id,
+            chapter_uid = info and info.chapter_uid,
+            range = info and info.range,
+        }
+        require("weread.ui.thought_popup.comment").attachLocation(pages, location)
         return ThoughtPopup.show(ThoughtPopupConfig.build(self, pages, {
-            comment_ctx = {
-                plugin = self,
-                book_id = info and info.book_id or self._current_weread_book_id,
-                chapter_uid = info and info.chapter_uid,
-                range = info and info.range,
-            },
+            comment_ctx = location,
             close_callback = function()
                 self._thought_popup_open = nil
                 self._current_thought_popup = nil
@@ -476,7 +478,7 @@ function M:_buildThoughtPagesFromHref(href)
     local db = self:_ensureThoughtDB(info.book_id)
     if db then
         local query_started = time.now()
-        local items = ThoughtDB.getReviewItems(db, info.chapter_uid, info.range)
+        local items = ThoughtDB.getReviewItems(db, info.chapter_uid, info.range, info.book_id)
         thought_perf("sqlite_range_query", query_started,
             "items=", tostring(type(items) == "table" and #items or 0))
         if type(items) == "table" and #items > 0 then
@@ -649,7 +651,7 @@ function M:_downloadMissingThought(info, href, link, tap_started)
 
         local db = self:_ensureThoughtDB(request.book_id)
         local pages = db and ThoughtDB.getReviewItems(
-            db, request.target_chapter_uid, request.target_range
+            db, request.target_chapter_uid, request.target_range, request.book_id
         ) or nil
         finish_request()
 

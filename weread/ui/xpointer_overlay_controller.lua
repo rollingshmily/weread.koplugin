@@ -130,7 +130,26 @@ function M:_onXPointerOverlayTap(ges)
             },
         }
     end
-    require("weread.ui.thought_popup").show(ThoughtPopupConfig.build(self, items))
+    local location = {
+        plugin = self,
+        book_id = record.book_id or self._current_weread_book_id,
+        chapter_uid = record.chapter_uid,
+        range = record.range,
+        abstract = record.text,
+    }
+    for _, item in ipairs(items) do
+        if type(item) == "table" then
+            item.book_id = item.book_id or location.book_id
+            item.chapter_uid = item.chapter_uid or location.chapter_uid
+            item.range = item.range or location.range
+            if item.abstract == nil or item.abstract == "" then
+                item.abstract = location.abstract
+            end
+        end
+    end
+    require("weread.ui.thought_popup").show(ThoughtPopupConfig.build(self, items, {
+        comment_ctx = location,
+    }))
     return true
 end
 

@@ -132,6 +132,7 @@ function M:onReaderReady()
         -- popup. Visibility is decided inside _onThoughtTap / applyAnnotationVisibility.
         self:_setupThoughtInterception()
         require("weread.lib.eink_annotation_upload").install(self)
+        require("weread.ui.thought_popup.comment").bind(self)
         -- ThoughtDB is intentionally lazy: opening a document must not perform
         -- SQLite I/O on the reader lifecycle. It is opened on the first thought
         -- tap instead.
@@ -142,6 +143,7 @@ function M:onReaderReady()
             end
         end
     else
+        require("weread.ui.thought_popup.comment").unbind(self)
         if self._orig_onEndOfBook and self.ui.status then
             self.ui.status.onEndOfBook = self._orig_onEndOfBook
             self._orig_onEndOfBook = nil
@@ -222,6 +224,7 @@ function M:onCloseDocument()
     self._current_weread_book_id = nil
     self:_teardownThoughtInterception()
     require("weread.lib.eink_annotation_upload").uninstall(self)
+    require("weread.ui.thought_popup.comment").unbind(self)
     require("weread.ui.thought_popup").cleanup()
     self:_teardownXPointerOverlayPrototype()
     self:_removeReaderHighlightTapGuard()

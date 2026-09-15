@@ -54,7 +54,9 @@ function M.show(opts)
     -- public contract uses "pages". Normalize once so the initial construction
     -- and the pooled reopen below both receive the items.
     opts.items = opts.items or opts.pages
-    Comment.setContext(opts.comment_ctx)
+    if opts.comment_ctx then
+        Comment.setContext(opts.comment_ctx)
+    end
 
     local position = normalizePosition(opts.position)
 
@@ -76,7 +78,6 @@ function M.show(opts)
     local pooled = _pool[position]
     if pooled then
         pooled:_reopen(opts)
-        pooled.comment_ctx = opts.comment_ctx
         UIManager:show(pooled)
         return pooled
     end
@@ -92,9 +93,7 @@ function M.show(opts)
         tap_to_page = opts.tap_to_page,
         dialog = opts.dialog,
         close_callback = opts.close_callback,
-        comment_ctx = opts.comment_ctx,
     }
-    popup.comment_ctx = opts.comment_ctx
     _pool[position] = popup
     UIManager:show(popup)
     return popup
@@ -135,7 +134,7 @@ function M.getPoolStats()
 end
 
 function M.cleanup()
-    Comment.setContext(nil)
+    Comment.clearContext()
     if not next(_pool) then
         return
     end
@@ -148,7 +147,7 @@ function M.cleanup()
         pooled:_freeContentCaches()
     end
     _pool = {}
-    Comment.setContext(nil)
+    Comment.clearContext()
     pcall(function()
         FaceFactory:clearCache()
     end)

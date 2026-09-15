@@ -64,7 +64,24 @@ local ctx = Comment.resolve({ items = { { abstract = "银" } } })
 expect(ctx.book_id == "465030" and ctx.chapter_uid == 1898 and ctx.range == "10-20",
     "module context fills book/chapter/range when widget ctx is missing")
 expect(ctx.abstract == "银", "item abstract is used when ctx has none")
+Comment.clearContext()
+
+local stamped = Comment.attachLocation({ { author = "海客", content = "不是跑" } }, {
+    book_id = "465030",
+    chapter_uid = 1898,
+    range = "10-20",
+    abstract = "银",
+})
+Comment.bind({ _current_weread_book_id = "465030", client = {} })
+ctx = Comment.resolve({ items = stamped })
+expect(ctx.plugin ~= nil and ctx.book_id == "465030"
+        and ctx.chapter_uid == 1898 and ctx.range == "10-20",
+    "downloaded thought ids plus bound plugin resolve without href parsing")
 Comment.setContext(nil)
+ctx = Comment.resolve({ items = stamped })
+expect(ctx.chapter_uid == 1898 and ctx.range == "10-20",
+    "nil setContext does not wipe thought ids")
+Comment.unbind()
 
 print(string.format("thought_popup_comment_spec: %d checks, %d failure(s)", checks, failures))
 os.exit(failures == 0 and 0 or 1)

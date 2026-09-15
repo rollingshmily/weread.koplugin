@@ -77,4 +77,55 @@ function Source.quote(spans, range)
     end
     return table.concat(pieces)
 end
+
+--- Map visible mark text back to a WeRead HTML range using stored source spans.
+-- Same "start-end" contract as Annotations.rangeFromMarkText: 0-index, end exclusive,
+-- unique match only.
+function Source.rangeFromMarkText(spans, mark_text)
+    if type(spans) ~= "table" or type(mark_text) ~= "string" or mark_text == "" then
+        return nil
+    end
+    local needle = {}
+    local i = 1
+    while i <= #mark_text do
+        local size = length(mark_text:byte(i))
+        needle[#needle + 1] = mark_text:sub(i, i + size - 1)
+        i = i + size
+    end
+    if #needle == 0 then return nil end
+    local visible = {}
+    for _, span in ipairs(spans) do
+        if type(span) == "table" and type(span[3]) == "string" then
+            local html_pos = span[1]
+            local text = span[3]
+            local pos = 1
+            while pos <= #text do
+                local size = length(text:byte(pos))
+                visible[#visible + 1] = { html_pos, text:sub(pos, pos + size - 1) }
+                html_pos = html_pos + 1
+                pos = pos + size
+            end
+        end
+    end
+    if #visible < #needle then return nil end
+    local found
+    for start = 1, #visible - #needle + 1 do
+        local matched = true
+        for offset = 1, #needle do
+            if visible[start + offset - 1][2] ~= needle[offset] then
+                matched = false
+                break
+            end
+        end
+        if matched then
+            if found then return nil end
+            found = start
+        end
+    end
+    if not found then return nil end
+    local first = visible[found][1]
+    local last = visible[found + #needle - 1][1]
+    return tostring(first) .. "-" .. tostring(last + 1)
+end
+
 return Source

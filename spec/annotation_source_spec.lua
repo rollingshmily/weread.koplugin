@@ -12,4 +12,11 @@ assert(Source.quote(spans, "15-18") == "", "range starting inside an entity was 
 assert(Source.quote(Source.plain("甲<&乙"), "1-3") == "<&", "raw TXT offsets were interpreted as HTML")
 local scripted = Source.index('<script>x</script><p>abc</p>')
 assert(#scripted == 1 and scripted[1][3] == "abc", "script text entered quote source")
+assert(Source.rangeFromMarkText(spans, "甲乙丙") == "3-9",
+    "stored source spans map mark text to the same HTML range")
+assert(Source.rangeFromMarkText(spans, "甲乙") == "3-5",
+    "stored source range matches quote offsets")
+assert(Source.rangeFromMarkText(Source.index("<p>啊啊</p>"), "啊") == nil,
+    "duplicate visible text refuses to guess")
+assert(Source.rangeFromMarkText(spans, "不存在") == nil, "missing mark text returns nil")
 print("annotation_source_spec: original rune offsets, UTF-8, tags and entities passed")

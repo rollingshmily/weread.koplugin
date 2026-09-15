@@ -8,9 +8,49 @@ local T = PluginUtil.T
 
 local Comment = {}
 Comment._ctx = nil
+Comment._plugin = nil
+
+function Comment.bind(plugin)
+    Comment._plugin = plugin
+end
+
+function Comment.unbind(plugin)
+    if plugin == nil or Comment._plugin == plugin then
+        Comment._plugin = nil
+        Comment._ctx = nil
+    end
+end
 
 function Comment.setContext(ctx)
+    if ctx == nil then return end
     Comment._ctx = ctx
+end
+
+function Comment.clearContext()
+    Comment._ctx = nil
+end
+
+function Comment.attachLocation(items, meta)
+    if type(items) ~= "table" or type(meta) ~= "table" then
+        return items
+    end
+    for _, item in ipairs(items) do
+        if type(item) == "table" then
+            if item.book_id == nil or item.book_id == "" then
+                item.book_id = meta.book_id or meta.bookId
+            end
+            if item.chapter_uid == nil or item.chapter_uid == "" then
+                item.chapter_uid = meta.chapter_uid or meta.chapterUid
+            end
+            if item.range == nil or item.range == "" then
+                item.range = meta.range
+            end
+            if (item.abstract == nil or item.abstract == "") and meta.abstract then
+                item.abstract = meta.abstract
+            end
+        end
+    end
+    return items
 end
 
 function Comment.resolve(popup)
@@ -31,10 +71,17 @@ function Comment.resolve(popup)
             ctx.book_id = src.bookId
         end
     end
-    take(popup and popup.comment_ctx)
+    if popup and type(popup.items) == "table" then
+        take(popup.items[1])
+        if ctx.range == nil then
+            for _, item in ipairs(popup.items) do
+                take(item)
+                if ctx.range ~= nil then break end
+            end
+        end
+    end
     take(Comment._ctx)
-    take(popup and popup.items and popup.items[1])
-    take(popup)
+    ctx.plugin = Comment._plugin or ctx.plugin
     if ctx.plugin and (ctx.book_id == nil or ctx.book_id == "") then
         ctx.book_id = ctx.plugin._current_weread_book_id
     end
