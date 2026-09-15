@@ -97,6 +97,15 @@ local function fixture(remote, options)
             queue[#queue + 1] = callback
             delays[#delays + 1] = delay
         end,
+        unschedule = function(_self, callback)
+            for i, item in ipairs(queue) do
+                if item == callback then
+                    table.remove(queue, i)
+                    table.remove(delays, i)
+                    return
+                end
+            end
+        end,
     }
     local choices = {}
     local uploads = {}
@@ -526,9 +535,13 @@ test("long resume waits for a real network event before rechecking", function()
         "resume does not start network work")
     eq(f.sync:status().verified, false,
         "reading report remains gated until recheck")
+    eq(#f.queue, 1, "offline resume schedules one fallback")
+    eq(f.delays[1], 8, "fallback waits for DHCP quiet period")
     f.drain()
     eq(f.sync:status().state, "waiting_for_network",
-        "scheduler stays idle while Wi-Fi is down")
+        "fallback stays idle while Wi-Fi is down")
+    eq(f.sync:status().verified, false,
+        "offline fallback does not clear the report gate")
 
     online = true
     f.sync:on_network_connected()
@@ -536,7 +549,7 @@ test("long resume waits for a real network event before rechecking", function()
         "network event completes deferred recheck")
 end)
 
-test("resume while link is up still waits for NetworkConnected", function()
+test("resume while link is up still waits before fallback recheck", function()
     local now = 100
     local f = fixture({
         bookId = "book",
@@ -556,15 +569,16 @@ test("resume while link is up still waits for NetworkConnected", function()
     f.sync:on_suspend()
     now = 100 + 6 * 60
     f.sync:on_resume()
-    f.drain()
     eq(f.sync:status().state, "waiting_for_network",
-        "stale link-up must not start resume network work")
+        "stale link-up must not start resume network work immediately")
     eq(f.sync:status().verified, false,
-        "resume recheck stays gated until NetworkConnected")
+        "reading report remains gated until recheck")
+    eq(#f.queue, 1, "online resume still defers to fallback")
+    eq(f.delays[1], 8, "fallback waits for DHCP quiet period")
 
-    f.sync:on_network_connected()
+    f.drain()
     eq(f.sync:status().verified, true,
-        "real network event completes deferred recheck")
+        "fallback rechecks once the quiet period has passed")
 end)
 
 test("stale connected state keeps resume recheck queued after child failure", function()

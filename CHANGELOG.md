@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.53]
+
+### 锁屏唤醒后阅读上报不再卡死
+
+- crash(15)：开着书休眠超过 5 分钟后，进度同步清掉 `verified` 干等 `NetworkConnected`。Kindle 唤醒时常不播这个事件，上报一直 `progress_unverified`，微信阅读挑战记 0 分钟。
+- 唤醒当下仍然不打网（避开 DHCP 那几秒）。8 秒后如果还在等、而且已经在线，自动再 pull 一次。真正的 NetworkConnected 来了照旧立刻重校验。
+
+
 ## [1.2.52]
 
 ### 预下载下一章可见

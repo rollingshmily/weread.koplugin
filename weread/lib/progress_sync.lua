@@ -18,6 +18,9 @@ ProgressSync.__index = ProgressSync
 
 local OPEN_DELAY_SECONDS = 0.6
 local RESUME_RECHECK_SECONDS = 5 * 60
+-- Match reader_lifecycle's post-resume quiet window. Kindle can keep a stale
+-- link-up through sleep; waiting only for NetworkConnected then never rechecks.
+local RESUME_FALLBACK_SECONDS = 8
 local PULL_RETRY_DELAY_SECONDS = 15
 local PULL_MAX_RETRIES = 3
 local BUSY_RETRY_SECONDS = 2
@@ -1023,6 +1026,7 @@ function ProgressSync:on_account_changed()
     self.document_context = nil
     self.pending_jump = nil
     self.resume_recheck_pending = false
+    self:_cancel_resume_fallback()
     self.verified = false
     self.dirty = false
     self.state = "account_changed"
@@ -1039,6 +1043,7 @@ function ProgressSync:on_reader_ready()
     self.dirty = false
     self.pulling = false
     self.resume_recheck_pending = false
+    self:_cancel_resume_fallback()
     self.state = "waiting"
 
     self.scheduler:scheduleIn(OPEN_DELAY_SECONDS, function()
@@ -1099,6 +1104,7 @@ function ProgressSync:on_close_document()
     self.document_context = nil
     self.pulling = false
     self.resume_recheck_pending = false
+    self:_cancel_resume_fallback()
 end
 
 function ProgressSync:on_suspend()
@@ -1116,18 +1122,54 @@ function ProgressSync:on_suspend()
     end
 end
 
+function ProgressSync:_cancel_resume_fallback()
+    local task = self._resume_fallback_task
+    self._resume_fallback_task = nil
+    if task and type(self.scheduler.unschedule) == "function" then
+        self.scheduler:unschedule(task)
+    end
+end
+
+function ProgressSync:_schedule_resume_fallback()
+    self:_cancel_resume_fallback()
+    local generation = self.generation
+    local task
+    task = function()
+        if self._resume_fallback_task ~= task then
+            return
+        end
+        self._resume_fallback_task = nil
+        if generation ~= self.generation then return end
+        if not self.resume_recheck_pending then return end
+        if not self.current_book_id then return end
+        if not self.is_online() then
+            log("info", "resume fallback still offline, waiting for network")
+            return
+        end
+        log("info", "resume fallback starting recheck")
+        self:_run_resume_recheck()
+    end
+    self._resume_fallback_task = task
+    self.scheduler:scheduleIn(RESUME_FALLBACK_SECONDS, task)
+end
+
 function ProgressSync:on_resume()
     local slept = self.suspended_at and self.now() - self.suspended_at or 0
     self.suspended_at = nil
+    self:_cancel_resume_fallback()
     if slept >= RESUME_RECHECK_SECONDS
         and self:_config().pull_on_open == true then
         self.resume_recheck_pending = true
         self:_clear_verified("resume_recheck")
         self.state = "waiting_for_network"
+        log("info", "resume recheck queued:",
+            "slept=", tostring(slept),
+            "wait=NetworkConnected or fallback")
+        -- Kindle still reports link-up while NetworkMgr forces DHCP. Do not
+        -- hit the network on this call. Prefer NetworkConnected; if that
+        -- event never arrives, the delayed fallback rechecks once online.
+        self:_schedule_resume_fallback()
     end
-    -- Kindle still reports link-up while NetworkMgr forces DHCP. Hitting the
-    -- network here blocks the UI thread until Wi-Fi actually returns.
-    -- Queue the recheck and wait for the real NetworkConnected event.
 end
 
 function ProgressSync:_pending_upload()
@@ -1148,8 +1190,10 @@ function ProgressSync:_run_resume_recheck()
     local started = self:_pull({ manual = false, resume_recheck = true })
     if not started then
         self.resume_recheck_pending = true
+        return false
     end
-    return started
+    self:_cancel_resume_fallback()
+    return true
 end
 
 function ProgressSync:on_network_connected()
