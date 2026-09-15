@@ -258,8 +258,10 @@ function Annotations.buildThoughtPopupItems(range_review)
             items[#items + 1] = {
                 abstract = abstract,
                 author = tostring(author.nick or author.name or "匿名"),
+                authorVid = tostring(author.userVid or author.vid or author.userId or ""),
                 content = tostring(review.content or ""),
                 likes_count = tonumber(pr.likesCount) or 0,
+                reviewId = tostring(review.reviewId or pr.reviewId or ""),
             }
         end
     end

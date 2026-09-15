@@ -321,7 +321,15 @@ function M:_showThoughtPopup(pages, link, session_gen, tap_started)
 
     local popup_started = time.now()
     local ok, popup = pcall(function()
+        local href = self:_linkHref(link)
+        local info = href and self:_parseThoughtHref(href) or nil
         return ThoughtPopup.show(ThoughtPopupConfig.build(self, pages, {
+            comment_ctx = {
+                plugin = self,
+                book_id = info and info.book_id or self._current_weread_book_id,
+                chapter_uid = info and info.chapter_uid,
+                range = info and info.range,
+            },
             close_callback = function()
                 self._thought_popup_open = nil
                 self._current_thought_popup = nil

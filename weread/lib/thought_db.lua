@@ -71,9 +71,13 @@ function ThoughtDB.open(book_dir)
                 author      TEXT    NOT NULL,
                 content     TEXT    NOT NULL,
                 likes_count INTEGER NOT NULL DEFAULT 0,
+                review_id   TEXT,
+                author_vid  TEXT,
                 PRIMARY KEY (chapter_uid, range, item_index)
             ) WITHOUT ROWID
         ]])
+        pcall(function() db:exec("ALTER TABLE review_items ADD COLUMN review_id TEXT") end)
+        pcall(function() db:exec("ALTER TABLE review_items ADD COLUMN author_vid TEXT") end)
     end)
     if not schema_ok then
         logger.warn("thought_db schema init failed:", db_path, schema_err)
@@ -91,7 +95,7 @@ function ThoughtDB.getReviewItems(db, chapter_uid, range_str)
 
     local ok, stmt = pcall(function()
         return db:prepare([[
-            SELECT abstract, author, content, likes_count
+            SELECT abstract, author, content, likes_count, review_id, author_vid
             FROM review_items
             WHERE chapter_uid=? AND range=?
             ORDER BY item_index
@@ -113,6 +117,8 @@ function ThoughtDB.getReviewItems(db, chapter_uid, range_str)
             author = row[2],
             content = row[3],
             likes_count = row[4],
+            reviewId = row[5],
+            authorVid = row[6],
         }
         step_ok, row = pcall(function() return stmt:step() end)
         if not step_ok then
@@ -128,8 +134,9 @@ local function insert_reviews(db, chapter_uid, reviews)
     local Annotations = require("weread.lib.annotations")
     local insert_stmt = db:prepare([[
         INSERT INTO review_items
-            (chapter_uid, range, item_index, abstract, author, content, likes_count)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (chapter_uid, range, item_index, abstract, author, content, likes_count,
+             review_id, author_vid)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ]])
 
     local by_range = {}
@@ -150,7 +157,8 @@ local function insert_reviews(db, chapter_uid, reviews)
         for item_index, item in ipairs(items) do
             insert_stmt:reset():bind(
                 chapter_uid, range_str, item_index,
-                item.abstract, item.author, item.content, item.likes_count
+                item.abstract, item.author, item.content, item.likes_count,
+                item.reviewId, item.authorVid
             ):step()
             inserted = inserted + 1
         end

@@ -108,6 +108,21 @@ end
 
 do
     local client, posted = make_client()
+    client:eink_comment_review({
+        reviewId = "rv-1",
+        content = "回一句",
+        atUserVid = "123",
+        extra = "drop",
+    })
+    expect(posted[1].path == "/review/comment", "comment posts /review/comment")
+    expect(posted[1].payload.reviewId == "rv-1", "comment sends reviewId")
+    expect(posted[1].payload.content == "回一句", "comment sends content")
+    expect(posted[1].payload.atUserVids[1] == "123", "comment sends atUserVids array")
+    expect(posted[1].payload.extra == nil, "comment drops unknown keys")
+end
+
+do
+    local client, posted = make_client()
     client:eink_delete_review("rv-1")
     expect(posted[1].path == "/review/delete", "delete posts /review/delete")
     expect(posted[1].payload.reviewId == "rv-1", "delete sends reviewId")

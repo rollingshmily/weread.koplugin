@@ -13,7 +13,6 @@ height ratio are the same settings the bottom popup uses.
 --]]
 
 local BD = require("ui/bidi")
-local ButtonDialog = require("ui/widget/buttondialog")
 local Blitbuffer = require("ffi/blitbuffer")
 local ButtonTable = require("ui/widget/buttontable")
 local CenterContainer = require("ui/widget/container/centercontainer")
@@ -23,6 +22,7 @@ local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local Comment = require("weread.ui.thought_popup.comment")
 local PageRenderer = require("weread.ui.thought_popup.pages")
 local PageViewport = require("weread.ui.thought_popup.page_viewport")
 local PluginUtil = require("weread.lib.plugin_util")
@@ -55,6 +55,7 @@ local CenterThoughtPopupWidget = InputContainer:extend{
     contrast = 9,
     tap_to_page = true,
     close_callback = nil,
+    comment_ctx = nil,
     dialog = nil,
     page_index = 1,
 
@@ -139,6 +140,7 @@ function CenterThoughtPopupWidget:_reopen(opts)
     if opts.contrast ~= nil then self.contrast = opts.contrast end
     if opts.tap_to_page ~= nil then self.tap_to_page = opts.tap_to_page end
     if opts.dialog then self.dialog = opts.dialog end
+    if opts.comment_ctx ~= nil then self.comment_ctx = opts.comment_ctx end
     self.close_callback = opts.close_callback
     self.height_ratio = math.max(0.1, math.min(0.9, self.height_ratio or 0.70))
     self.width_ratio = math.max(0.4, math.min(1.0, self.width_ratio or 0.8))
@@ -158,6 +160,14 @@ function CenterThoughtPopupWidget:_title()
         return abstract:gsub("%s+", " ")
     end
     return _("Thoughts")
+end
+
+function CenterThoughtPopupWidget:_commentContext()
+    local ctx = self.comment_ctx or {}
+    if not ctx.abstract then
+        ctx.abstract = self.items and self.items[1] and self.items[1].abstract
+    end
+    return ctx
 end
 
 --- Previous / page indicator / Next button row.
@@ -188,6 +198,22 @@ function CenterThoughtPopupWidget:_buildButtons()
     }
 end
 
+function CenterThoughtPopupWidget:_buttonRows()
+    local popup = self
+    return {
+        {
+            {
+                text = _("Comment"),
+                id = "comment_highlight",
+                callback = function()
+                    Comment.commentOnHighlight(popup:_commentContext())
+                end,
+            },
+        },
+        self:_buildButtons(),
+    }
+end
+
 function CenterThoughtPopupWidget:_buildLayout()
     self:clear()
     self.page_index = 1
@@ -212,7 +238,7 @@ function CenterThoughtPopupWidget:_buildLayout()
 
     self._button_table = ButtonTable:new{
         width = self.width - 2 * BUTTON_PADDING,
-        buttons = { self:_buildButtons() },
+        buttons = self:_buttonRows(),
         zero_sep = true,
         show_parent = self,
     }
@@ -329,6 +355,15 @@ function CenterThoughtPopupWidget:onTapClose(_, ges)
         UIManager:close(self)
         return true
     end
+    local viewport = self._viewport
+    if viewport and viewport.dimen and ges.pos:intersectWith(viewport.dimen) then
+        local content_y = (ges.pos.y - viewport.dimen.y) + (self._page_starts[self.page_index] or 0)
+        local piece, item = Comment.findPieceAtY(self._pages, self.items, content_y)
+        if piece and piece.variant == "meta" and item then
+            Comment.replyToItem(self:_commentContext(), item)
+            return true
+        end
+    end
     -- Optional tap-to-page: left/right half of the window flips pages.
     if self.tap_to_page then
         local dimen = self.container.dimen
@@ -404,29 +439,7 @@ function CenterThoughtPopupWidget:_findItemAtContentY(y)
 end
 
 function CenterThoughtPopupWidget:_showThoughtActionMenu(item)
-    local popup = self
-    local action_dialog
-    action_dialog = ButtonDialog:new{
-        buttons = {
-            {
-                {
-                    text = _("Copy"),
-                    callback = function()
-                        UIManager:close(action_dialog)
-                        popup:_copyThoughtContent(item)
-                    end,
-                },
-                {
-                    text = _("Generate QR code"),
-                    callback = function()
-                        UIManager:close(action_dialog)
-                        popup:_generateQRCode(item)
-                    end,
-                },
-            },
-        },
-    }
-    UIManager:show(action_dialog)
+    Comment.showActionMenu(self, item)
 end
 
 function CenterThoughtPopupWidget:_copyThoughtContent(item)

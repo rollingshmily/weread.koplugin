@@ -14,7 +14,7 @@ bottom/tap/Back gestures.
 
 local Blitbuffer = require("ffi/blitbuffer")
 local BottomContainer = require("ui/widget/container/bottomcontainer")
-local ButtonDialog = require("ui/widget/buttondialog")
+local Comment = require("weread.ui.thought_popup.comment")
 local Device = require("device")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -29,8 +29,6 @@ local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Screen = Device.screen
-local PluginUtil = require("weread.lib.plugin_util")
-local _ = PluginUtil.tr
 
 local TOP_BORDER_SIZE = Size.line.thick
 local PADDING_TOP = Size.padding.large
@@ -50,6 +48,7 @@ local ThoughtPopupWidget = InputContainer:extend{
     contrast = 9,
     tap_to_page = false,
     close_callback = nil,
+    comment_ctx = nil,
     dialog = nil,
 
     _pages = nil,
@@ -124,6 +123,7 @@ function ThoughtPopupWidget:_reopen(opts)
     if opts.contrast ~= nil then self.contrast = opts.contrast end
     if opts.tap_to_page ~= nil then self.tap_to_page = opts.tap_to_page end
     if opts.dialog then self.dialog = opts.dialog end
+    if opts.comment_ctx ~= nil then self.comment_ctx = opts.comment_ctx end
     self.close_callback = opts.close_callback
     self.height_ratio = math.max(0.1, math.min(0.9, self.height_ratio or 0.70))
     self.height = math.floor(Screen:getHeight() * self.height_ratio)
@@ -211,9 +211,27 @@ function ThoughtPopupWidget:onClose()
     return true
 end
 
+function ThoughtPopupWidget:_commentContext()
+    local ctx = self.comment_ctx or {}
+    if not ctx.abstract then
+        ctx.abstract = self.items and self.items[1] and self.items[1].abstract
+    end
+    return ctx
+end
+
 function ThoughtPopupWidget:onTapClose(_, ges)
     if ges.pos:notIntersectWith(self.container.dimen) then
         UIManager:close(self)
+        return true
+    end
+    local scroll = self._scroll_container
+    if scroll and scroll.dimen and ges.pos:intersectWith(scroll.dimen) then
+        local content_y = (ges.pos.y - scroll.dimen.y) + (scroll.scroll_offset or 0)
+        local piece, item = Comment.findPieceAtY(self._pages, self.items, content_y)
+        if piece and piece.variant == "meta" and item then
+            Comment.replyToItem(self:_commentContext(), item)
+            return true
+        end
     end
     return true
 end
@@ -265,29 +283,7 @@ function ThoughtPopupWidget:_findItemAtContentY(y)
 end
 
 function ThoughtPopupWidget:_showThoughtActionMenu(item)
-    local popup = self
-    local action_dialog
-    action_dialog = ButtonDialog:new{
-        buttons = {
-            {
-                {
-                    text = _("Copy"),
-                    callback = function()
-                        UIManager:close(action_dialog)
-                        popup:_copyThoughtContent(item)
-                    end,
-                },
-                {
-                    text = _("Generate QR code"),
-                    callback = function()
-                        UIManager:close(action_dialog)
-                        popup:_generateQRCode(item)
-                    end,
-                },
-            },
-        },
-    }
-    UIManager:show(action_dialog)
+    Comment.showActionMenu(self, item, { include_highlight = true })
 end
 
 function ThoughtPopupWidget:_copyThoughtContent(item)

@@ -1,0 +1,58 @@
+package.path = "./?.lua;./?/init.lua;" .. package.path
+
+package.preload["ui/uimanager"] = function()
+    return { show = function() end, close = function() end }
+end
+package.preload["weread.lib.plugin_util"] = function()
+    return {
+        tr = function(text) return text end,
+        T = function(text) return text end,
+    }
+end
+
+local Comment = require("weread.ui.thought_popup.comment")
+
+local checks, failures = 0, 0
+local function expect(value, label)
+    checks = checks + 1
+    if not value then
+        failures = failures + 1
+        print("FAIL " .. label)
+    end
+end
+
+local items = {
+    { author = "海客", content = "不是跑", reviewId = "r1" },
+    { author = "少平", content = "听你说", reviewId = "r2" },
+}
+local renderer = {
+    layout = {
+        pieces = {
+            { variant = "quote", y = 0, piece_h = 40 },
+            { variant = "meta", y = 40, piece_h = 20 },
+            { variant = "content", y = 60, piece_h = 40 },
+            { variant = "meta", y = 100, piece_h = 20 },
+            { variant = "content", y = 120, piece_h = 50 },
+        },
+    },
+}
+
+local piece, item = Comment.findPieceAtY(renderer, items, 45)
+expect(piece and piece.variant == "meta" and item.author == "海客",
+    "tap on nickname hits the author meta line")
+
+piece, item = Comment.findPieceAtY(renderer, items, 80)
+expect(piece and piece.variant == "content" and item.author == "海客",
+    "tap on comment body is content, not treated as nickname")
+
+piece, item = Comment.findPieceAtY(renderer, items, 105)
+expect(piece and piece.variant == "meta" and item.author == "少平",
+    "second nickname maps to the second thought")
+
+piece = Comment.findPieceAtY(renderer, items, 10)
+expect(piece and piece.variant == "quote", "quote line is not a nickname")
+
+expect(Comment.findPieceAtY(renderer, items, 999) == nil, "missed y returns nil")
+
+print(string.format("thought_popup_comment_spec: %d checks, %d failure(s)", checks, failures))
+os.exit(failures == 0 and 0 or 1)

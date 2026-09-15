@@ -90,6 +90,10 @@ local buttons = popup:_buildButtons()
 eq(buttons[1].vsync, true, "previous button uses synchronized feedback")
 eq(buttons[3].vsync, true, "next button uses synchronized feedback")
 
+local rows = popup:_buttonRows()
+eq(rows[1][1].id == "comment_highlight", true, "comment sits on its own row above the pager")
+eq(rows[2][1].id == "prev_page", true, "pager row stays previous / page / next")
+
 popup:changePage(1)
 eq(popup.page_index, 2, "next page updates the page index")
 eq(dirty_target, popup, "page navigation redraws the popup itself")

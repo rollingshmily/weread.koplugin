@@ -1372,6 +1372,9 @@ local USEREDIT_REVIEW_KEYS = {
     "reviewId", "content", "isPrivate", "friendship", "notVisibleToFriends",
     "type", "bookId", "chapterUid", "range", "abstract",
 }
+local COMMENT_REVIEW_KEYS = {
+    "reviewId", "content", "isPrivate", "friendship", "htmlContent",
+}
 
 local function copy_known_keys(source, keys)
     local payload = {}
@@ -1463,6 +1466,25 @@ function Client:eink_useredit_review(fields)
         payload.type = tonumber(payload.type) or 1
     end
     local data = self:eink_post_json("/review/useredit", payload)
+    self._eink_bookmark_cache = nil
+    return data
+end
+
+function Client:eink_comment_review(fields)
+    local payload = copy_known_keys(fields, COMMENT_REVIEW_KEYS)
+    payload.reviewId = tostring(payload.reviewId or "")
+    payload.content = tostring(payload.content or "")
+    if payload.reviewId == "" or payload.content == "" then
+        error("eink review/comment missing reviewId/content")
+    end
+    payload.isPrivate = tonumber(payload.isPrivate) or 0
+    payload.friendship = tonumber(payload.friendship) or 0
+    if payload.htmlContent == nil then payload.htmlContent = "" end
+    local at_vid = fields and (fields.atUserVid or fields.authorVid)
+    if at_vid and tostring(at_vid) ~= "" then
+        payload.atUserVids = { tostring(at_vid) }
+    end
+    local data = self:eink_post_json("/review/comment", payload)
     self._eink_bookmark_cache = nil
     return data
 end
