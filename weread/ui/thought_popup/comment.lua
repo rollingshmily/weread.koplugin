@@ -255,37 +255,30 @@ end
 
 function Comment.actionButtons(popup, item, extra)
     extra = extra or {}
+    local wrap = extra.close_then or function(fn) return fn end
     local rows = {}
-    if extra.include_highlight then
+    local function add(text, fn)
         rows[#rows + 1] = {
             {
-                text = _("Comment"),
-                callback = extra.close_then(function()
-                    Comment.commentOnHighlight(popup)
-                end),
+                text = text,
+                callback = wrap(fn),
             },
         }
     end
-    rows[#rows + 1] = {
-        {
-            text = _("Reply"),
-            callback = extra.close_then(function()
-                Comment.replyToItem(popup, item)
-            end),
-        },
-        {
-            text = _("Copy"),
-            callback = extra.close_then(function()
-                popup:_copyThoughtContent(item)
-            end),
-        },
-        {
-            text = _("Generate QR code"),
-            callback = extra.close_then(function()
-                popup:_generateQRCode(item)
-            end),
-        },
-    }
+    if extra.include_highlight then
+        add(_("Comment"), function()
+            Comment.commentOnHighlight(popup)
+        end)
+    end
+    add(_("Reply"), function()
+        Comment.replyToItem(popup, item)
+    end)
+    add(_("Copy"), function()
+        popup:_copyThoughtContent(item)
+    end)
+    add(_("Generate QR code"), function()
+        popup:_generateQRCode(item)
+    end)
     return rows
 end
 
@@ -301,6 +294,8 @@ function Comment.showActionMenu(popup, item, extra)
     local ButtonDialog = require("ui/widget/buttondialog")
     action_dialog = ButtonDialog:new{
         buttons = Comment.actionButtons(popup, item, extra),
+        width_factor = 0.5,
+        shrink_unneeded_width = true,
     }
     UIManager:show(action_dialog)
 end

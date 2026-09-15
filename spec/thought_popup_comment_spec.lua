@@ -83,5 +83,15 @@ expect(ctx.chapter_uid == 1898 and ctx.range == "10-20",
     "nil setContext does not wipe thought ids")
 Comment.unbind()
 
+do
+    local rows = Comment.actionButtons({}, { content = "hi" })
+    expect(#rows == 3 and #rows[1] == 1 and rows[1][1].text == "Reply"
+            and rows[2][1].text == "Copy" and rows[3][1].text == "Generate QR code",
+        "hold menu stacks reply/copy/QR as one button per row")
+    rows = Comment.actionButtons({}, { content = "hi" }, { include_highlight = true })
+    expect(#rows == 4 and rows[1][1].text == "Comment",
+        "bottom popup hold menu keeps Comment on its own row")
+end
+
 print(string.format("thought_popup_comment_spec: %d checks, %d failure(s)", checks, failures))
 os.exit(failures == 0 and 0 or 1)
