@@ -10,7 +10,6 @@ local logger = require("weread.lib.logger")
 local unpack = unpack
 
 local Upload = {}
-Upload._html_cache = {}
 
 local function annotation_item(...)
     for index = 1, select("#", ...) do
@@ -105,31 +104,6 @@ function Upload.chapter_for_item(plugin, book, item)
     return nil
 end
 
-function Upload.original_chapter_html(client, book, chapter)
-    if not client or not book or not chapter then return nil end
-    local book_id = tostring(book.book_id or book.bookId or "")
-    local uid = tostring(chapter.chapterUid or "")
-    if book_id == "" or uid == "" then return nil end
-    local cache_key = book_id .. ":" .. uid
-    if Upload._html_cache[cache_key] then
-        return Upload._html_cache[cache_key]
-    end
-    local param = Eink.build_chapters_param({ chapter.chapterUid })
-    if param == "" then return nil end
-    local ok, files = pcall(client.eink_download_zip, client, book_id, param)
-    if not ok or type(files) ~= "table" then
-        logger.warn("eink upload chapter zip failed:", tostring(files))
-        return nil
-    end
-    local bodies = Eink.files_to_chapter_bodies(files, { chapter })
-    local html = bodies and bodies[uid]
-    if type(html) ~= "string" or html == "" then
-        return nil
-    end
-    Upload._html_cache[cache_key] = html
-    return html
-end
-
 function Upload.stored_original(plugin, book_id, chapter_uid)
     if not plugin or book_id == nil or chapter_uid == nil then return nil end
     local store = plugin._annotation_context and plugin._annotation_context.store
@@ -162,9 +136,7 @@ function Upload.range_for_item(client, book, chapter, item, plugin)
             return range
         end
     end
-    local html = Upload.original_chapter_html(client, book, chapter)
-    if not html then return nil end
-    return Annotations.rangeFromMarkText(html, text)
+    return nil
 end
 
 function Upload.can_upload(plugin)
@@ -379,7 +351,6 @@ function Upload.uninstall(plugin)
         plugin._eink_upload_target = nil
         plugin._eink_upload_originals = nil
     end
-    Upload._html_cache = {}
 end
 
 return Upload

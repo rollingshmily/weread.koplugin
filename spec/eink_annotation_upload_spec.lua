@@ -71,7 +71,40 @@ do
     expect(kind == "bookmark", "stored original uploads a bookmark")
     expect(item.weread.range == "3-7", "stored original yields the HTML range")
     expect(zip_calls == 0, "stored original does not download chapter zip")
-    Upload._html_cache = {}
+end
+
+do
+    local zip_calls = 0
+    local plugin = {
+        _current_weread_book_id = "465030",
+        client = {
+            can_eink_download = function() return true end,
+            eink_download_zip = function()
+                zip_calls = zip_calls + 1
+                error("must not download chapter zip")
+            end,
+            eink_add_bookmark = function()
+                error("must not upload without stored original")
+            end,
+        },
+        settings = {
+            get = function()
+                return {
+                    ["465030"] = {
+                        book_id = "465030",
+                        chapters = { { chapterUid = 1395 } },
+                    },
+                }
+            end,
+        },
+        ui = { document = { file = "/tmp/book.epub" } },
+        getChapterInfoFromFile = function()
+            return 1, { chapterUid = 1395 }, false
+        end,
+    }
+    local _, err = Upload.upload_added(plugin, { text = "你好世界", pos0 = "xpointer" })
+    expect(err == "no_range", "missing stored original skips upload")
+    expect(zip_calls == 0, "missing stored original does not download chapter zip")
 end
 
 do
