@@ -54,6 +54,30 @@ expect(piece and piece.variant == "quote", "quote line is not a nickname")
 
 expect(Comment.findPieceAtY(renderer, items, 999) == nil, "missed y returns nil")
 
+do
+    local meta = {
+        variant = "meta",
+        x = 0,
+        line_h = 20,
+        ink_w = 80,
+        lines = { { width = 80 } },
+    }
+    expect(Comment.isNicknameTap(meta, 10) == true, "tap on nickname text replies")
+    expect(Comment.isNicknameTap(meta, 79) == true, "tap at the end of nickname text replies")
+    expect(Comment.isNicknameTap(meta, 200) == false,
+        "tap on empty space to the right of nickname does not reply")
+    expect(Comment.isNicknameTap(meta, -1) == false, "tap left of nickname does not reply")
+    expect(Comment.isNicknameTap({
+        variant = "meta", x = 0, line_h = 20,
+    }, 10) == false, "meta without ink width does not claim the whole row")
+    expect(Comment.isNicknameTap({
+        variant = "content", x = 0, line_h = 20, ink_w = 80,
+    }, 10) == false, "content piece is never a nickname tap")
+    local viewport = { dimen = { x = 40, y = 80 }, margin_left = 20 }
+    expect(Comment.contentX(viewport, { pos = { x = 70, y = 90 } }) == 10,
+        "content x subtracts viewport origin and left margin")
+end
+
 Comment.setContext({
     plugin = { _current_weread_book_id = "465030" },
     book_id = "465030",

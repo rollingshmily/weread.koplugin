@@ -83,7 +83,9 @@ function ThoughtPopupWidget:init()
             HoldThought = {
                 GestureRange:new{
                     ges = "hold",
-                    range = range,
+                    range = function()
+                        return self._scroll_container and self._scroll_container.dimen
+                    end,
                 }
             },
         }
@@ -218,7 +220,8 @@ function ThoughtPopupWidget:onTapClose(_, ges)
     if scroll and scroll.dimen and ges.pos:intersectWith(scroll.dimen) then
         local content_y = (ges.pos.y - scroll.dimen.y) + (scroll.scroll_offset or 0)
         local piece, item = Comment.findPieceAtY(self._pages, self.items, content_y)
-        if piece and piece.variant == "meta" and item then
+        if piece and piece.variant == "meta" and item
+            and Comment.isNicknameTap(piece, Comment.contentX(scroll, ges)) then
             Comment.replyToItem(self, item)
             return true
         end
@@ -248,8 +251,9 @@ function ThoughtPopupWidget:onHoldThought(_, ges)
         if item then
             self:_showThoughtActionMenu(item)
         end
+        return true
     end
-    return true
+    return false
 end
 
 function ThoughtPopupWidget:_findItemAtContentY(y)

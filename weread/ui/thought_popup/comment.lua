@@ -111,6 +111,41 @@ function Comment.findPieceAtY(renderer, items, y)
     return nil, nil
 end
 
+function Comment.inkWidth(piece)
+    local w = 0
+    if piece and piece.lines then
+        for _, line in ipairs(piece.lines) do
+            local lw = tonumber(line.width) or tonumber(line.x_end) or 0
+            if lw > w then w = lw end
+        end
+    end
+    if w <= 0 and piece then
+        w = tonumber(piece.ink_w) or 0
+    end
+    return w
+end
+
+--- Nickname tap uses the rendered name width, not the full row.
+function Comment.isNicknameTap(piece, x)
+    if not piece or piece.variant ~= "meta" or x == nil then
+        return false
+    end
+    local ink = Comment.inkWidth(piece)
+    if ink <= 0 then
+        return false
+    end
+    local pad = math.max(8, math.floor((piece.line_h or 16) * 0.6))
+    local left = piece.x or 0
+    return x >= left and x < left + ink + pad
+end
+
+function Comment.contentX(container, ges)
+    if not container or not container.dimen or not ges or not ges.pos then
+        return nil
+    end
+    return ges.pos.x - container.dimen.x - (container.margin_left or 0)
+end
+
 local function notify(plugin, text, sticky)
     logger.info("thought comment:", text)
     if plugin and plugin.showInfo and sticky then

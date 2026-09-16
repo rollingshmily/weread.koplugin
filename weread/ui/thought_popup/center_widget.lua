@@ -94,7 +94,9 @@ function CenterThoughtPopupWidget:init()
             HoldThought = {
                 GestureRange:new{
                     ges = "hold",
-                    range = range,
+                    range = function()
+                        return self._viewport and self._viewport.dimen
+                    end,
                 }
             },
         }
@@ -361,7 +363,8 @@ function CenterThoughtPopupWidget:onTapClose(_, ges)
     if viewport and viewport.dimen and ges.pos:intersectWith(viewport.dimen) then
         local content_y = (ges.pos.y - viewport.dimen.y) + (self._page_starts[self.page_index] or 0)
         local piece, item = Comment.findPieceAtY(self._pages, self.items, content_y)
-        if piece and piece.variant == "meta" and item then
+        if piece and piece.variant == "meta" and item
+            and Comment.isNicknameTap(piece, Comment.contentX(viewport, ges)) then
             Comment.replyToItem(self, item)
             return true
         end
@@ -415,8 +418,9 @@ function CenterThoughtPopupWidget:onHoldThought(_, ges)
         if item then
             self:_showThoughtActionMenu(item)
         end
+        return true
     end
-    return true
+    return false
 end
 
 function CenterThoughtPopupWidget:_findItemAtContentY(y)
