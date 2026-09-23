@@ -241,8 +241,13 @@ function Settings:new()
     if legacy_changed then
         obj.store:flush()
     end
-    PathIndex.rebuild(obj.store:readSetting("books", {}))
-    PathIndex.adopt_markers(obj.cache_dir)
+    if not PathIndex.loaded then
+        PathIndex.ensure_loaded()
+    end
+    if not next(PathIndex.map) then
+        PathIndex.rebuild(obj.store:readSetting("books", {}))
+        PathIndex.adopt_markers(obj.cache_dir)
+    end
     return setmetatable(obj, self)
 end
 

@@ -3,6 +3,8 @@
 
 local M = {
     map = {},
+    by_id = {},
+    norm = nil,
     loaded = false,
 }
 
@@ -14,9 +16,28 @@ local function index_file_path()
     return DataStorage:getSettingsDir() .. "/weread-path-index.lua"
 end
 
+local function dirname(path)
+    return tostring(path):match("^(.*)[/\\][^/\\]+$") or ""
+end
+
+local function basename(path)
+    return tostring(path):match("([^/\\]+)$") or path
+end
+
+local function norm_key(path)
+    local EpubPath = require("weread.lib.epub_path")
+    return dirname(path) .. "\0" .. EpubPath.normalize_filename(basename(path))
+end
+
 local function add_path(map, path, book_id)
-    if type(path) == "string" and path ~= "" and book_id then
-        map[path] = tostring(book_id)
+    if type(path) ~= "string" or path == "" or not book_id then
+        return
+    end
+    book_id = tostring(book_id)
+    map[path] = book_id
+    M.by_id[book_id] = path
+    if M.norm then
+        M.norm[norm_key(path)] = book_id
     end
 end
 
@@ -31,16 +52,11 @@ function M.ingest_index(map, book_id, index)
             add_path(map, chapter_path, book_id)
         end
     end
-    M.write_marker(index.cached_file, book_id)
-    M.write_marker(index.cached_full_book, book_id)
-    if type(index.cached_chapters) == "table" then
-        for _uid, chapter_path in pairs(index.cached_chapters) do
-            M.write_marker(chapter_path, book_id)
-        end
-    end
 end
 
 function M.rebuild(indexes)
+    M.by_id = {}
+    M.norm = nil
     local map = {}
     for book_id, index in pairs(indexes or {}) do
         M.ingest_index(map, book_id, index)
@@ -62,6 +78,9 @@ function M.write_marker(file_path, book_id)
     local marker = M.marker_path(file_path)
     if not marker or not book_id then
         return false
+    end
+    if M.read_marker(file_path) == tostring(book_id) then
+        return true
     end
     local source = io.open(file_path, "r")
     if not source then
@@ -121,11 +140,20 @@ function M.existing_file(book_id)
     if not M.loaded then
         M.ensure_loaded()
     end
+    local hinted = M.by_id[book_id] or nil
+    if hinted then
+        local file = io.open(hinted, "r")
+        if file then
+            file:close()
+            return hinted
+        end
+    end
     for path, mapped in pairs(M.map) do
         if mapped == book_id then
             local file = io.open(path, "r")
             if file then
                 file:close()
+                M.by_id[book_id] = path
                 return path
             end
         end
@@ -166,7 +194,19 @@ function M.adopt_markers(dir)
     return adopted
 end
 
--- Reader open: sidecar, exact path map, then same-folder normalized filename.
+function M.ensure_norm()
+    if M.norm then
+        return M.norm
+    end
+    local norm = {}
+    for path, book_id in pairs(M.map) do
+        norm[norm_key(path)] = book_id
+    end
+    M.norm = norm
+    return norm
+end
+
+-- Reader open: sidecar, exact path, then O(1) normalized filename.
 function M.identify(file_path)
     local marked = M.read_marker(file_path)
     if marked then
@@ -179,21 +219,13 @@ function M.identify(file_path)
     if hit then
         return hit
     end
-    local EpubPath = require("weread.lib.epub_path")
-    local dir = tostring(file_path):match("^(.*)[/\\][^/\\]+$") or ""
-    local name = EpubPath.normalize_filename(
-        tostring(file_path):match("([^/\\]+)$") or file_path)
-    for stored, book_id in pairs(M.map) do
-        local stored_dir = tostring(stored):match("^(.*)[/\\][^/\\]+$") or ""
-        if stored_dir == dir
-            and EpubPath.normalize_filename(
-                tostring(stored):match("([^/\\]+)$") or stored) == name then
-            M.set(file_path, book_id)
-            M.persist()
-            return book_id
-        end
+    local book_id = M.ensure_norm()[norm_key(file_path)]
+    if not book_id then
+        return nil
     end
-    return nil
+    M.set(file_path, book_id)
+    M.persist()
+    return book_id
 end
 
 function M.persist()
@@ -227,15 +259,23 @@ function M.ensure_loaded()
     local ok, map = pcall(dofile, path)
     if ok and type(map) == "table" then
         M.map = map
+        M.by_id = {}
+        for file_path, book_id in pairs(map) do
+            M.by_id[book_id] = file_path
+        end
     else
         M.map = {}
+        M.by_id = {}
     end
+    M.norm = nil
     M.loaded = true
     return M.map
 end
 
 function M.reset()
     M.map = {}
+    M.by_id = {}
+    M.norm = nil
     M.loaded = false
 end
 
