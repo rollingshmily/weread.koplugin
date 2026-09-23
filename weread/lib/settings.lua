@@ -2,6 +2,7 @@ local DataStorage = require("datastorage")
 local BookStore = require("weread.lib.book_store")
 local Cookie = require("weread.lib.cookie")
 local LuaSettings = require("luasettings")
+local PathIndex = require("weread.lib.path_index")
 local lfs = require("libs/libkoreader-lfs")
 local ok_time, time = pcall(require, "ui/time")
 if not ok_time then
@@ -240,6 +241,7 @@ function Settings:new()
     if legacy_changed then
         obj.store:flush()
     end
+    PathIndex.rebuild(obj.store:readSetting("books", {}))
     return setmetatable(obj, self)
 end
 
@@ -270,24 +272,38 @@ local function remap_stored_paths(index, old_path, new_path)
     end
 end
 
-function Settings:find_book_id_by_path(file_path)
+function Settings:find_book_id_by_path(file_path, opts)
     local started = time.now()
+    opts = opts or {}
     if type(file_path) ~= "string" or file_path == "" then
         perf("path_index.invalid", started)
         return nil
     end
 
-    -- Read only the compact raw index. Do not hydrate every BookStore record
-    -- while KOReader is still opening the current document.
+    if not PathIndex.loaded then
+        PathIndex.rebuild(self.store:readSetting("books", {}))
+    end
+    local mapped = PathIndex.identify(file_path)
+    if mapped then
+        perf("path_index.hit", started, "kind=map")
+        return mapped
+    end
+    if opts.allow_rename == false then
+        perf("path_index.miss", started)
+        return nil
+    end
+
     local indexes = self.store:readSetting("books", {})
     for book_id, index in pairs(indexes or {}) do
         if type(index) == "table" then
             if index.cached_file == file_path or index.cached_full_book == file_path then
+                PathIndex.set(file_path, book_id)
                 perf("path_index.hit", started, "kind=full_book")
                 return tostring(book_id)
             end
             for _uid, chapter_path in pairs(index.cached_chapters or {}) do
                 if chapter_path == file_path then
+                    PathIndex.set(file_path, book_id)
                     perf("path_index.hit", started, "kind=chapter")
                     return tostring(book_id)
                 end
@@ -307,6 +323,8 @@ function Settings:find_book_id_by_path(file_path)
                     remap_stored_paths(index, stored, file_path)
                     self.store:saveSetting("books", indexes)
                     self.store:flush()
+                    PathIndex.set(file_path, book_id)
+                    PathIndex.persist()
                     perf("path_index.hit", started, "kind=renamed")
                     return tostring(book_id)
                 end
@@ -361,6 +379,9 @@ function Settings:update_book(book_id, patch)
     local flush_started = time.now()
     self.store:saveSetting("books", indexes)
     self.store:flush()
+    PathIndex.ingest_index(PathIndex.map, book_id, new_index)
+    PathIndex.loaded = true
+    PathIndex.persist()
     perf("update_book.flush", flush_started, "book=", book_id)
     perf("update_book.total", total_started, "book=", book_id)
     return true
@@ -392,6 +413,7 @@ function Settings:set(key, value)
             indexes[book_id] = index_or_err
         end
         value = indexes
+        PathIndex.rebuild(indexes)
     end
     self.store:saveSetting(key, value)
 end

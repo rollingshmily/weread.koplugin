@@ -1856,6 +1856,19 @@ function Downloader:_step(dl)
 
             apply_cache_result(dl.book)
             if record ~= dl.book then apply_cache_result(record) end
+            if ok then
+                local PathIndex = require("weread.lib.path_index")
+                if dl.single_chapter then
+                    PathIndex.set(path, book_id)
+                elseif dl.separate_chapters then
+                    for _uid, chapter_path in pairs(chapter_paths or {}) do
+                        PathIndex.set(chapter_path, book_id)
+                    end
+                else
+                    PathIndex.set(path, book_id)
+                end
+                PathIndex.persist()
+            end
             record.cache_dir = dl.book.cache_dir or record.cache_dir
             record.reader_url = record.reader_url
                 or dl.book.reader_url or WeRead.reader_url(book_id)

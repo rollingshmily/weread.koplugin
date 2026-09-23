@@ -433,64 +433,12 @@ function M:detectWeReadBook()
         return book_id
     end
 
-    -- Flat EPUBs can be resolved from the compact raw index without hydrating
-    -- every BookStore record during the reader lifecycle.
+    -- Same library folder as local books: only the reverse path index may
+    -- identify a WeRead file. Never walk the book table or stat siblings.
     if self.settings.find_book_id_by_path then
-        local indexed = self.settings:find_book_id_by_path(file)
-        if indexed then
-            return remember(indexed)
-        end
-    end
-
-    -- Local KOReader books live outside the WeRead cache/meta trees.
-    -- Never hydrate the full book table just to prove a miss.
-    local cache_dir = self.settings.cache_dir
-    local prefix = nil
-    local in_cache = false
-    if type(cache_dir) == "string" and cache_dir ~= "" then
-        prefix = cache_dir:gsub("/+$", "") .. "/"
-        in_cache = file:sub(1, #prefix) == prefix
-    end
-    local meta_root = self.settings.meta_dir
-    local meta_prefix = nil
-    local in_meta = false
-    if type(meta_root) == "string" and meta_root ~= "" then
-        meta_prefix = meta_root:gsub("/+$", "") .. "/"
-        in_meta = file:sub(1, #meta_prefix) == meta_prefix
-    end
-    if not in_cache and not in_meta then
-        return remember(nil)
-    end
-
-    local books = self.settings:get("books", {})
-
-    -- Legacy/nested content still living under a bookId sidecar/content dir.
-    for book_id, book in pairs(books) do
-        if type(book) == "table" then
-            local dir = Content.book_resolved_dir(
-                self.settings, book_id, book):gsub("/+$", "") .. "/"
-            if file:sub(1, #dir) == dir then
-                return remember(book_id)
-            end
-        end
-    end
-
-    -- Legacy path layout only: <download>/<book_id>/file.epub
-    if in_cache and prefix then
-        local rest = file:sub(#prefix + 1)
-        local nested_id = rest:match("^([^/]+)/")
-        if nested_id and books[nested_id] then
-            return remember(nested_id)
-        end
-        if nested_id then
-            return remember(nested_id)
-        end
-    end
-
-    -- Opened a file under metadata tree (rare; MP html etc.).
-    if in_meta and meta_prefix then
-        local rest = file:sub(#meta_prefix + 1)
-        return remember(rest:match("^([^/]+)"))
+        return remember(self.settings:find_book_id_by_path(file, {
+            allow_rename = false,
+        }))
     end
     return remember(nil)
 end
