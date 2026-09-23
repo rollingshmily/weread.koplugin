@@ -69,6 +69,34 @@ expect(host:detectWeReadBook() == "book",
 expect(index_calls == 1,
     "the same document path is indexed only once")
 
+local local_books_loads = 0
+local local_host = {
+    ui = {
+        document = { file = "/mnt/onboard/Documents/local.epub" },
+    },
+    settings = {
+        cache_dir = "/books",
+        meta_dir = "/meta",
+        find_book_id_by_path = function()
+            return nil
+        end,
+        get = function(_self, key)
+            if key == "books" then
+                local_books_loads = local_books_loads + 1
+                error("full book store should not be loaded for local files")
+            end
+            return {}
+        end,
+    },
+}
+for key, value in pairs(Lifecycle) do
+    local_host[key] = value
+end
+expect(local_host:detectWeReadBook() == nil,
+    "files outside cache/meta are not WeRead books")
+expect(local_books_loads == 0,
+    "local documents do not hydrate the WeRead book table")
+
 print(string.format(
     "reader_lifecycle_path_cache_spec: %d checks, %d failure(s)",
     checks, failures))

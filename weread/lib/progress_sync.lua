@@ -1084,7 +1084,26 @@ function ProgressSync:on_page_update()
     self.local_position = position
 end
 
+function ProgressSync:release_document(_reason)
+    self.generation = self.generation + 1
+    self.current_book_id = nil
+    self.verified = false
+    self.local_position = nil
+    self.remote_position = nil
+    self.document_context = nil
+    self.pulling = false
+    self.resume_recheck_pending = false
+    self.dirty = false
+    self.pending_jump = nil
+    self.state = "idle"
+    self:_cancel_resume_fallback()
+end
+
 function ProgressSync:on_close_document()
+    if not self.current_book_id then
+        self:release_document("document_close")
+        return
+    end
     local position = self:capture_local() or self.local_position
     if position and self.verified
         and self:_config().upload_on_close == true then
@@ -1096,15 +1115,7 @@ function ProgressSync:on_close_document()
             self:_upload_snapshot(position, "document_close", false)
         end
     end
-    self.generation = self.generation + 1
-    self.current_book_id = nil
-    self.verified = false
-    self.local_position = nil
-    self.remote_position = nil
-    self.document_context = nil
-    self.pulling = false
-    self.resume_recheck_pending = false
-    self:_cancel_resume_fallback()
+    self:release_document("document_close")
 end
 
 function ProgressSync:on_suspend()

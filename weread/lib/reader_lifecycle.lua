@@ -148,19 +148,24 @@ function M:onReaderReady()
             self.ui.status.onEndOfBook = self._orig_onEndOfBook
             self._orig_onEndOfBook = nil
         end
+        if self.progress_sync and self.progress_sync.release_document then
+            self.progress_sync:release_document("not_weread")
+        end
+        if self.read_report then
+            self.read_report:stop("document_not_weread")
+        end
+        perf("reader_ready.total", total_started)
+        return
     end
 
-    -- Register the EPUB-safe external annotation prototype for any CREngine
-    -- document. The view module remains empty until the user adds a prototype
-    -- range, so unsupported/non-participating books pay only an empty module
-    -- function call during paint.
+    -- Overlay / thought paint only for WeRead documents. Local books skip this
+    -- entire reader pipeline so open/close stays on KOReader's native path.
     self:_setupXPointerOverlayPrototype()
     if self.onUnifiedAnnotationsReady then self:onUnifiedAnnotationsReady() end
 
     local sync_started = time.now()
     self.progress_sync:on_reader_ready()
     perf("reader_ready.progress_sync", sync_started)
-    -- Auto mode silently skips non-WeRead documents; no toast (still logged by ReadReport).
     local prefetch_session_gen = self._reader_session_gen
     UIManager:scheduleIn(0.2, function()
         if prefetch_session_gen ~= self._reader_session_gen then return end
@@ -173,6 +178,9 @@ function M:onReaderReady()
 end
 
 function M:onPageUpdate()
+    if not self._current_weread_book_id then
+        return
+    end
     self.progress_sync:on_page_update()
     -- Prefetch writes projections in the background. Reload the overlay
     -- window on page turn so the next chapter's marks are visible without
@@ -204,29 +212,38 @@ end
 
 function M:onCloseDocument()
     local total_started = time.now()
+    local weread_active = self._current_weread_book_id ~= nil
     -- Capture the immutable local position while the document is still alive.
     -- The network upload is scheduled; stopping ReadReport below also frees any
     -- in-flight report slot before that scheduled upload begins.
     local sync_started = time.now()
-    self.progress_sync:on_close_document()
+    if weread_active then
+        self.progress_sync:on_close_document()
+    elseif self.progress_sync and self.progress_sync.release_document then
+        self.progress_sync:release_document("document_closed")
+    end
     perf("close.progress_sync", sync_started)
     self._reader_session_gen = (self._reader_session_gen or 0) + 1
-    self.downloader:cancelPrefetch("document_closed")
-    if self._cancelUnifiedAnnotationSync then self:_cancelUnifiedAnnotationSync() end
-    self._annotation_pending_prefetch = nil
-    self._annotation_prefetch_signature = nil
-    if self._thought_prefetch_task then
-        pcall(function() UIManager:unschedule(self._thought_prefetch_task) end)
-        self._thought_prefetch_task = nil
+    if self.downloader then
+        self.downloader:cancelPrefetch("document_closed")
     end
-    self._annotation_context = nil
+    if weread_active then
+        if self._cancelUnifiedAnnotationSync then self:_cancelUnifiedAnnotationSync() end
+        self._annotation_pending_prefetch = nil
+        self._annotation_prefetch_signature = nil
+        if self._thought_prefetch_task then
+            pcall(function() UIManager:unschedule(self._thought_prefetch_task) end)
+            self._thought_prefetch_task = nil
+        end
+        self._annotation_context = nil
+        self:_teardownThoughtInterception()
+        require("weread.lib.eink_annotation_upload").uninstall(self)
+        require("weread.ui.thought_popup.comment").unbind(self)
+        require("weread.ui.thought_popup").cleanup()
+        self:_teardownXPointerOverlayPrototype()
+    end
     self._current_weread_file = nil
     self._current_weread_book_id = nil
-    self:_teardownThoughtInterception()
-    require("weread.lib.eink_annotation_upload").uninstall(self)
-    require("weread.ui.thought_popup.comment").unbind(self)
-    require("weread.ui.thought_popup").cleanup()
-    self:_teardownXPointerOverlayPrototype()
     self:_removeReaderHighlightTapGuard()
 
     if self._orig_onEndOfBook and self.ui.status then
@@ -235,7 +252,11 @@ function M:onCloseDocument()
     end
 
     local report_started = time.now()
-    self.read_report:on_close_document()
+    if weread_active then
+        self.read_report:on_close_document()
+    elseif self.read_report then
+        self.read_report:stop("document_closed")
+    end
     perf("close.read_report", report_started)
     perf("close.total", total_started)
 end
@@ -382,6 +403,9 @@ end
 function M:onResume()
     -- Keep thought prefetch off until Wi-Fi finishes DHCP after a long sleep.
     self._resume_quiet_until = os.time() + 8
+    if not self._current_weread_book_id then
+        return
+    end
     self.progress_sync:on_resume()
     self.read_report:on_resume()
 end
@@ -418,6 +442,26 @@ function M:detectWeReadBook()
         end
     end
 
+    -- Local KOReader books live outside the WeRead cache/meta trees.
+    -- Never hydrate the full book table just to prove a miss.
+    local cache_dir = self.settings.cache_dir
+    local prefix = nil
+    local in_cache = false
+    if type(cache_dir) == "string" and cache_dir ~= "" then
+        prefix = cache_dir:gsub("/+$", "") .. "/"
+        in_cache = file:sub(1, #prefix) == prefix
+    end
+    local meta_root = self.settings.meta_dir
+    local meta_prefix = nil
+    local in_meta = false
+    if type(meta_root) == "string" and meta_root ~= "" then
+        meta_prefix = meta_root:gsub("/+$", "") .. "/"
+        in_meta = file:sub(1, #meta_prefix) == meta_prefix
+    end
+    if not in_cache and not in_meta then
+        return remember(nil)
+    end
+
     local books = self.settings:get("books", {})
 
     -- Legacy/nested content still living under a bookId sidecar/content dir.
@@ -432,8 +476,7 @@ function M:detectWeReadBook()
     end
 
     -- Legacy path layout only: <download>/<book_id>/file.epub
-    local prefix = self.settings.cache_dir:gsub("/+$", "") .. "/"
-    if file:sub(1, #prefix) == prefix then
+    if in_cache and prefix then
         local rest = file:sub(#prefix + 1)
         local nested_id = rest:match("^([^/]+)/")
         if nested_id and books[nested_id] then
@@ -445,13 +488,9 @@ function M:detectWeReadBook()
     end
 
     -- Opened a file under metadata tree (rare; MP html etc.).
-    local meta_root = self.settings.meta_dir
-    if type(meta_root) == "string" and meta_root ~= "" then
-        local meta_prefix = meta_root:gsub("/+$", "") .. "/"
-        if file:sub(1, #meta_prefix) == meta_prefix then
-            local rest = file:sub(#meta_prefix + 1)
-            return remember(rest:match("^([^/]+)"))
-        end
+    if in_meta and meta_prefix then
+        local rest = file:sub(#meta_prefix + 1)
+        return remember(rest:match("^([^/]+)"))
     end
     return remember(nil)
 end
