@@ -242,6 +242,7 @@ function Settings:new()
         obj.store:flush()
     end
     PathIndex.rebuild(obj.store:readSetting("books", {}))
+    PathIndex.adopt_markers(obj.cache_dir)
     return setmetatable(obj, self)
 end
 

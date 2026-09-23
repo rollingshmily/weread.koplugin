@@ -48,6 +48,12 @@ expect(PathIndex.identify(epub) == "465030",
 expect(PathIndex.identify(local_epub) == nil,
     "local EPUB does not match a different WeRead filename")
 
+PathIndex.reset()
+PathIndex.loaded = true
+PathIndex.map[epub] = "465030"
+expect(PathIndex.existing_file("465030") == epub,
+    "existing_file returns a live EPUB path for the book id")
+
 os.remove(PathIndex.marker_path(epub))
 os.remove(epub)
 os.remove(local_epub)

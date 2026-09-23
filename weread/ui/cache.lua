@@ -493,7 +493,7 @@ function M:showShelfFilterOptions(on_changed)
     UIManager:show(dialog)
 end
 
-function M:bookRecordHasDownload(record)
+function M:bookRecordHasDownload(record, book_id)
     if type(record) ~= "table" then return false end
     if file_exists(record.cached_full_book) or file_exists(record.cached_file) then
         return true
@@ -501,7 +501,10 @@ function M:bookRecordHasDownload(record)
     for _uid, path in pairs(record.cached_chapters or {}) do
         if file_exists(path) then return true end
     end
-    return false
+    local PathIndex = require("weread.lib.path_index")
+    local live = PathIndex.existing_file(
+        book_id or record.book_id or record.bookId)
+    return live ~= nil
 end
 
 function M:isBookDownloaded(book, saved_books, downloaded_cache)
@@ -513,7 +516,7 @@ function M:isBookDownloaded(book, saved_books, downloaded_cache)
         return downloaded_cache[book_id]
     end
     local record = (saved_books or self.settings:get("books", {}))[book_id]
-    local is_downloaded = self:bookRecordHasDownload(record)
+    local is_downloaded = self:bookRecordHasDownload(record, book_id)
     if downloaded_cache then
         downloaded_cache[book_id] = is_downloaded
     end

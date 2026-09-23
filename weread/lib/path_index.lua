@@ -63,6 +63,11 @@ function M.write_marker(file_path, book_id)
     if not marker or not book_id then
         return false
     end
+    local source = io.open(file_path, "r")
+    if not source then
+        return false
+    end
+    source:close()
     local file = io.open(marker, "w")
     if not file then
         return false
@@ -106,6 +111,59 @@ function M.lookup(path)
         return nil
     end
     return M.map[path]
+end
+
+function M.existing_file(book_id)
+    book_id = tostring(book_id or "")
+    if book_id == "" then
+        return nil
+    end
+    if not M.loaded then
+        M.ensure_loaded()
+    end
+    for path, mapped in pairs(M.map) do
+        if mapped == book_id then
+            local file = io.open(path, "r")
+            if file then
+                file:close()
+                return path
+            end
+        end
+    end
+    return nil
+end
+
+function M.adopt_markers(dir)
+    if type(dir) ~= "string" or dir == "" then
+        return 0
+    end
+    local ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")
+    if not ok_lfs or not lfs or type(lfs.dir) ~= "function" then
+        return 0
+    end
+    local ok, iter, dir_obj = pcall(lfs.dir, dir)
+    if not ok then
+        return 0
+    end
+    local adopted = 0
+    for name in iter, dir_obj do
+        local epub_name = type(name) == "string" and name:match("^(.*%.epub)%.weread$")
+        if epub_name then
+            local epub = dir:gsub("/+$", "") .. "/" .. epub_name
+            local book_id = M.read_marker(epub)
+            local file = book_id and io.open(epub, "r")
+            if file then
+                file:close()
+                add_path(M.map, epub, book_id)
+                adopted = adopted + 1
+            end
+        end
+    end
+    if adopted > 0 then
+        M.loaded = true
+        M.persist()
+    end
+    return adopted
 end
 
 -- Reader open: sidecar, exact path map, then same-folder normalized filename.

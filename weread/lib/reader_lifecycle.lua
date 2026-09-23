@@ -500,14 +500,17 @@ function M:getFullBookCachePath(book)
         return book.cached_full_book
     end
     local legacy = book.cached_file
-    if type(legacy) ~= "string" or legacy == "" then return nil end
-    if not file_exists(legacy) then return nil end
-    local mapped_count = 0
-    for _uid, path in pairs(book.cached_chapters or {}) do
-        if path == legacy then mapped_count = mapped_count + 1 end
+    if type(legacy) == "string" and legacy ~= "" and file_exists(legacy) then
+        local mapped_count = 0
+        for _uid, path in pairs(book.cached_chapters or {}) do
+            if path == legacy then mapped_count = mapped_count + 1 end
+        end
+        if mapped_count ~= 1 then
+            return legacy
+        end
     end
-    if mapped_count == 1 then return nil end
-    return legacy
+    local PathIndex = require("weread.lib.path_index")
+    return PathIndex.existing_file(book.book_id or book.bookId)
 end
 
 -- Retrieves chapter information for the given file path.
