@@ -49,4 +49,15 @@ expect(package.loaded["weread.plugin_runtime"] == nil,
 expect(package.loaded["weread.lib.client"] == nil,
     "idle reader does not load the WeRead client")
 
+local settings_touched = false
+Plugin.onReadSettings = function(self)
+    settings_touched = true
+    if not self.settings then
+        error("settings is nil")
+    end
+end
+plugin:handleEvent({ name = "ReadSettings" })
+expect(settings_touched == false,
+    "idle reader swallows class mixin events")
+
 print(("plugin_idle_reader_spec: %d checks"):format(checks))

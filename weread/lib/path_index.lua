@@ -108,7 +108,7 @@ function M.lookup(path)
     return M.map[path]
 end
 
--- Reader open: sidecar next to the EPUB, then the in-memory/disk path map.
+-- Reader open: sidecar, exact path map, then same-folder normalized filename.
 function M.identify(file_path)
     local marked = M.read_marker(file_path)
     if marked then
@@ -117,7 +117,25 @@ function M.identify(file_path)
     if not M.loaded then
         M.ensure_loaded()
     end
-    return M.lookup(file_path)
+    local hit = M.lookup(file_path)
+    if hit then
+        return hit
+    end
+    local EpubPath = require("weread.lib.epub_path")
+    local dir = tostring(file_path):match("^(.*)[/\\][^/\\]+$") or ""
+    local name = EpubPath.normalize_filename(
+        tostring(file_path):match("([^/\\]+)$") or file_path)
+    for stored, book_id in pairs(M.map) do
+        local stored_dir = tostring(stored):match("^(.*)[/\\][^/\\]+$") or ""
+        if stored_dir == dir
+            and EpubPath.normalize_filename(
+                tostring(stored):match("([^/\\]+)$") or stored) == name then
+            M.set(file_path, book_id)
+            M.persist()
+            return book_id
+        end
+    end
+    return nil
 end
 
 function M.persist()

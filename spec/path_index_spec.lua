@@ -40,6 +40,15 @@ expect(PathIndex.identify(local_epub) == nil,
     "local EPUB stays unmarked after reset")
 
 os.remove(PathIndex.marker_path(epub))
+PathIndex.reset()
+PathIndex.loaded = true
+PathIndex.map[root .. "/weread-book (tv).epub"] = "465030"
+expect(PathIndex.identify(epub) == "465030",
+    "same-folder normalized filenames still match WeRead books")
+expect(PathIndex.identify(local_epub) == nil,
+    "local EPUB does not match a different WeRead filename")
+
+os.remove(PathIndex.marker_path(epub))
 os.remove(epub)
 os.remove(local_epub)
 os.remove(root)

@@ -37,7 +37,8 @@ local ANNOTATION_HIDE_CSS =
 -- this from onReaderReady starts partial rerendering; its seamless reload then
 -- creates a new plugin instance and repeats the same rerender forever.
 function M:onReadSettings()
-    if not self.ui or not self.ui.document or not self:detectWeReadBook() then
+    if not self.settings or not self.ui or not self.ui.document
+        or not self:detectWeReadBook() then
         return
     end
     if self.settings:get("cache").show_annotations ~= false

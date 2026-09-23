@@ -415,7 +415,10 @@ function M:onNetworkConnected()
 end
 
 function M:detectWeReadBook()
-    if not self.ui.document then
+    if not self.settings then
+        return nil
+    end
+    if not self.ui or not self.ui.document then
         return nil
     end
     local file = self.ui.document.file

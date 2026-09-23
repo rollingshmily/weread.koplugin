@@ -26,29 +26,16 @@ local WeReadPlugin = WidgetContainer:extend{
     version = read_plugin_version(),
 }
 
-local IDLE_EVENTS = {
-    "onReaderReady",
-    "onCloseDocument",
-    "onPageUpdate",
-    "onResume",
-    "onSuspend",
-    "onNetworkConnected",
-    "onShowWeRead",
-}
-
 local function idle_reader(plugin)
     plugin._weread_idle_reader = true
-    local noop = function() end
-    for _, name in ipairs(IDLE_EVENTS) do
-        plugin[name] = noop
-    end
+    -- FileManager already mixed reader hooks onto the class. Swallow every
+    -- event on this instance so onReadSettings cannot touch nil settings.
+    plugin.handleEvent = function() end
 end
 
 local function clear_idle(plugin)
     plugin._weread_idle_reader = nil
-    for _, name in ipairs(IDLE_EVENTS) do
-        plugin[name] = nil
-    end
+    plugin.handleEvent = nil
 end
 
 local function boot(plugin)
