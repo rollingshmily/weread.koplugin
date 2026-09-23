@@ -25,6 +25,7 @@ local _ = PluginUtil.tr
 
 local M = {
     mixins_applied = false,
+    services = nil,
 }
 
 local function apply_mixins(plugin)
@@ -52,22 +53,8 @@ local function apply_mixins(plugin)
     M.mixins_applied = true
 end
 
-function M.boot(plugin)
-    apply_mixins(plugin)
-
-    math.randomseed(os.time())
-    plugin.settings = Settings:new()
-    if type(PluginUtil.set_perf_enabled) == "function" then
-        local advanced = plugin.settings:get("advanced", {})
-        PluginUtil.set_perf_enabled(advanced.developer_logs == true)
-    end
-    plugin.external_annotations_db = ExternalAnnotationsDB:new(plugin.settings)
-    plugin.library_db = LibraryDB:new(plugin.settings)
-    plugin.client = Client:new(plugin.settings)
-    plugin.prefetch_worker = BackgroundWorker:new{
-        temp_dir = plugin.settings.data_dir .. "/workers",
-        min_available_kb = 128 * 1024,
-    }
+local function bind_session_services(plugin, options)
+    options = options or {}
     plugin.downloader = Downloader:new{
         client = plugin.client,
         settings = plugin.settings,
@@ -86,20 +73,8 @@ function M.boot(plugin)
             return plugin:isNetworkConnected()
         end,
     }
-    Migrations.run(plugin.settings, plugin.client)
-    plugin.external_annotations_db:migrateLegacySettings()
-    if plugin.downloader.recover then
+    if options.recover ~= false and plugin.downloader.recover then
         plugin.downloader:recover()
-    end
-    if plugin.getUpdater then
-        local updater_ok, updater_result, updater_err = pcall(function()
-            return plugin:getUpdater():cleanup_backup()
-        end)
-        if not updater_ok then
-            logger.warn("updater backup recovery failed:", tostring(updater_result))
-        elseif updater_result == false then
-            logger.warn("updater backup recovery failed:", tostring(updater_err))
-        end
     end
     plugin.qr_login = QRLogin:new(plugin, plugin.client, plugin.settings)
     plugin.eink_qr_login = EinkQRLogin:new(plugin, plugin.client, plugin.settings)
@@ -217,9 +192,61 @@ function M.boot(plugin)
         end,
     }
     plugin:onDispatcherRegisterActions()
-    plugin.ui.menu:registerToMainMenu(plugin)
+    if plugin.ui and plugin.ui.menu and plugin.ui.menu.registerToMainMenu then
+        plugin.ui.menu:registerToMainMenu(plugin)
+    end
     plugin.integrations = Integrations
     plugin.integrations.register(plugin)
+    plugin._reader_session_gen = 0
+end
+
+function M.boot(plugin)
+    apply_mixins(plugin)
+
+    if M.services then
+        plugin.settings = M.services.settings
+        plugin.external_annotations_db = M.services.external_annotations_db
+        plugin.library_db = M.services.library_db
+        plugin.client = M.services.client
+        plugin.prefetch_worker = M.services.prefetch_worker
+        bind_session_services(plugin, { recover = false })
+        logger.info("initialized:", "version=", plugin.version, "reused=true")
+        return
+    end
+
+    math.randomseed(os.time())
+    plugin.settings = Settings:new()
+    if type(PluginUtil.set_perf_enabled) == "function" then
+        local advanced = plugin.settings:get("advanced", {})
+        PluginUtil.set_perf_enabled(advanced.developer_logs == true)
+    end
+    plugin.external_annotations_db = ExternalAnnotationsDB:new(plugin.settings)
+    plugin.library_db = LibraryDB:new(plugin.settings)
+    plugin.client = Client:new(plugin.settings)
+    plugin.prefetch_worker = BackgroundWorker:new{
+        temp_dir = plugin.settings.data_dir .. "/workers",
+        min_available_kb = 128 * 1024,
+    }
+    Migrations.run(plugin.settings, plugin.client)
+    plugin.external_annotations_db:migrateLegacySettings()
+    bind_session_services(plugin, { recover = true })
+    M.services = {
+        settings = plugin.settings,
+        external_annotations_db = plugin.external_annotations_db,
+        library_db = plugin.library_db,
+        client = plugin.client,
+        prefetch_worker = plugin.prefetch_worker,
+    }
+    if plugin.getUpdater then
+        local updater_ok, updater_result, updater_err = pcall(function()
+            return plugin:getUpdater():cleanup_backup()
+        end)
+        if not updater_ok then
+            logger.warn("updater backup recovery failed:", tostring(updater_result))
+        elseif updater_result == false then
+            logger.warn("updater backup recovery failed:", tostring(updater_err))
+        end
+    end
     local read_report = plugin.settings:get("read_report")
     if read_report.enabled
         and read_report.mode == "manual"
