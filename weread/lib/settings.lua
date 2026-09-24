@@ -246,8 +246,10 @@ function Settings:new()
     end
     if not next(PathIndex.map) then
         PathIndex.rebuild(obj.store:readSetting("books", {}))
-        PathIndex.adopt_markers(obj.cache_dir)
     end
+    -- Sidecar scan is cheap; skip only the full books-table rebuild.
+    -- Renamed EPUBs keep badges if *.epub.weread is still next to the file.
+    PathIndex.adopt_markers(obj.cache_dir)
     return setmetatable(obj, self)
 end
 

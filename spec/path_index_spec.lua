@@ -54,8 +54,35 @@ PathIndex.map[epub] = "465030"
 expect(PathIndex.existing_file("465030") == epub,
     "existing_file returns a live EPUB path for the book id")
 
+local renamed = root .. "/fanren-renamed.epub"
+assert(os.rename(epub, renamed), "rename epub")
+local marker = io.open(renamed .. ".weread", "w")
+marker:write("465030\n")
+marker:close()
+PathIndex.reset()
+PathIndex.loaded = true
+PathIndex.map[epub] = "465030"
+PathIndex.by_id["465030"] = epub
+package.preload["libs/libkoreader-lfs"] = function()
+    return {
+        dir = function()
+            local names = { "fanren-renamed.epub.weread", ".", ".." }
+            local i = 0
+            return function()
+                i = i + 1
+                return names[i]
+            end
+        end,
+    }
+end
+package.loaded["libs/libkoreader-lfs"] = nil
+expect(PathIndex.adopt_markers(root) == 1, "adopt_markers picks up renamed sidecar")
+expect(PathIndex.existing_file("465030") == renamed,
+    "shelf badge follows the renamed EPUB via sidecar")
+
+os.remove(PathIndex.marker_path(renamed))
+os.remove(renamed)
 os.remove(PathIndex.marker_path(epub))
-os.remove(epub)
 os.remove(local_epub)
 os.remove(root)
 
