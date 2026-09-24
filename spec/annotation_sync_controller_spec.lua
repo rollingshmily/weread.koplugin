@@ -213,6 +213,36 @@ host.startUnifiedAnnotationSync = function(_self, options) chosen = options.chap
 host:chooseAnnotationChapters()
 picker[4].callback(); picker[2].callback(); picker[1].callback()
 assert(#chosen == 2 and chosen[1].chapterUid == "1" and chosen[2].chapterUid == "3")
+-- Reopen a combined EPUB after matching only the current chapter.
+do
+    host._unified_annotations_active = nil
+    host._xpointer_overlay.records = {}
+    host._xpointer_overlay._annotation_window = nil
+    context.binding = { book_id = "book", automatic = true }
+    context.descriptor = { chapters = context.chapters, legacy = true }
+    context.chapters = {
+        { chapterUid = "1" }, { chapterUid = "2" }, { chapterUid = "3" },
+    }
+    context.ranges = {
+        ["1"] = { start_xpointer = "0" },
+        ["2"] = { start_xpointer = "2" },
+        ["3"] = { start_xpointer = "4" },
+    }
+    context.generation = 1
+    context.statuses = {
+        ["single:1"] = { stats = { total = 2, located = 2 } },
+    }
+    store:put("book", "status", "single:1", { stats = { total = 2, located = 2 } }, "1")
+    store:put("book", "projection", "single:1", {
+        records = { { start = "0", ["end"] = "1" } },
+    }, "1")
+    host.ui.document.getXPointer = function() return "0" end
+    host._annotation_context = context
+    host:_refreshAnnotationOverlay()
+    assert(host._xpointer_overlay.records
+            and #host._xpointer_overlay.records == 1,
+        "partial combined-book match must still paint overlay on reopen")
+end
 -- Clearing is the explicit refresh path: shared annotations and every file's
 -- coordinates are removed, while cached chapter text remains reusable.
 store:put("book", "original", "1", { spans = {} }, "1")

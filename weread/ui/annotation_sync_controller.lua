@@ -60,7 +60,16 @@ function M:_usesUnifiedAnnotations()
     end
     local store = self:_annotationStore()
     local key = store.documentKey(file(self))
-    return store:get(binding.book_id, "display", key) == true
+    if store:get(binding.book_id, "display", key) == true then return true end
+    -- Combined EPUB: only chapter 1 may be matched. Overlay still owns those
+    -- marks; baked CSS is empty on eink tar books.
+    local prefix = key .. ":"
+    for status_key in pairs(store:list(binding.book_id, "status") or {}) do
+        if tostring(status_key):sub(1, #prefix) == prefix then
+            return true
+        end
+    end
+    return false
 end
 
 function M:_prepareAnnotationContext(online, refresh_catalog)
@@ -151,12 +160,6 @@ end
 function M:_refreshAnnotationOverlay()
     local context, overlay = self._annotation_context, self._xpointer_overlay
     if not context or not overlay or #context.chapters == 0 then return end
-    if context.binding.automatic and not (context.descriptor and context.descriptor.clean)
-        and not self._unified_annotations_active
-        and self:_annotationSummary(context).chapters < #context.chapters then
-        overlay:setRecords({})
-        return
-    end
     local document = self.ui.document
     local current = document:getXPointer()
     local function chapter_at(point)
@@ -374,7 +377,7 @@ function M:_runAnnotationJob(context, options)
                     context.store:put(context.book_id, "meta", "prune_catalog", nil)
                 end
                 local summary = self:_annotationSummary(context)
-                if summary.chapters == #context.chapters and #context.chapters > 0 then
+                if summary.chapters > 0 then
                     context.store:put(context.book_id, "display", context.document_key, true)
                 end
                 if summary.chapters > 0 then
