@@ -1298,34 +1298,49 @@ function Client:eink_bookmarklist(book_id)
     return data
 end
 
+local function is_http_401(err)
+    return tostring(err or ""):find("HTTP 401", 1, true) ~= nil
+end
+
 function Client:eink_download_to_file(book_id, chapters_param, path)
-    local vid, token = self:eink_credentials()
-    if not vid then
-        error("eink credentials are missing")
+    local function attempt()
+        local vid, token = self:eink_credentials()
+        if not vid then
+            error("eink credentials are missing")
+        end
+        local query = {
+            "bookId=" .. WeRead.urlencode(tostring(book_id)),
+            "chapters=" .. WeRead.urlencode(tostring(chapters_param)),
+        }
+        table.sort(query)
+        local url = "https://i.weread.qq.com/book/chapterdownload?" .. table.concat(query, "&")
+        return self:download_to_file(url, path, {
+            skip_cookie = true,
+            persist_response_cookies = false,
+            timeout = { 30, 300 },
+            headers = {
+                ["User-Agent"] = Eink.USER_AGENT,
+                ["Accept"] = "*/*",
+                ["vid"] = vid,
+                ["accessToken"] = token,
+                ["appver"] = Eink.APPVER,
+                ["basever"] = Eink.APPVER,
+                ["baseapi"] = "30",
+                ["osver"] = "11",
+                ["channelId"] = "900",
+            },
+            diagnostic_api = "/book/chapterdownload",
+        })
     end
-    local query = {
-        "bookId=" .. WeRead.urlencode(tostring(book_id)),
-        "chapters=" .. WeRead.urlencode(tostring(chapters_param)),
-    }
-    table.sort(query)
-    local url = "https://i.weread.qq.com/book/chapterdownload?" .. table.concat(query, "&")
-    return self:download_to_file(url, path, {
-        skip_cookie = true,
-        persist_response_cookies = false,
-        timeout = { 30, 300 },
-        headers = {
-            ["User-Agent"] = Eink.USER_AGENT,
-            ["Accept"] = "*/*",
-            ["vid"] = vid,
-            ["accessToken"] = token,
-            ["appver"] = Eink.APPVER,
-            ["basever"] = Eink.APPVER,
-            ["baseapi"] = "30",
-            ["osver"] = "11",
-            ["channelId"] = "900",
-        },
-        diagnostic_api = "/book/chapterdownload",
-    })
+    local ok, a, b, c = pcall(attempt)
+    if not ok and is_http_401(a) and self:eink_refresh_session() then
+        ok, a, b, c = pcall(attempt)
+    end
+    if not ok then
+        if is_http_401(a) then self:mark_eink_auth_failed() end
+        error(a, 0)
+    end
+    return a, b, c
 end
 
 function Client:eink_download_zip(book_id, chapters_param)
