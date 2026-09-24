@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.70]
+
+### 合订本下完想法不再整本重排把划线刷没
+
+- 统一 overlay 显示划线时，下载结束后只刷新 overlay，不再 `setStyleSheet`/`UpdatePos`。
+- 避免 CRE `stylesheet hash mismatch` 全量重渲染，左上角转圈后划线消失。
+
+
 ## [1.2.69]
 
 ### 改名后的书架角标不再被路径索引跳过

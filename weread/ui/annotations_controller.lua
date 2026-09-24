@@ -74,6 +74,11 @@ function M:applyAnnotationVisibility()
     if self._xpointer_overlay then
         self._xpointer_overlay:setEnabled(show)
         UIManager:setDirty(self.dialog, "ui")
+        -- Combined EPUBs (凡人修仙传合订本) reflow the whole book on
+        -- setStyleSheet/UpdatePos. Overlay already owns underlines.
+        if self._usesUnifiedAnnotations and self:_usesUnifiedAnnotations() then
+            return
+        end
     end
     if not self:detectWeReadBook() then
         return
